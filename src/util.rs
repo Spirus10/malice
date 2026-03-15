@@ -1,5 +1,9 @@
 pub mod logger;
+pub mod app;
 pub mod command;
 pub mod httpserver;
 pub mod tasks;
 pub mod packet;
+pub mod implants;
+pub mod payloads;
+pub mod router;

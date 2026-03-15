@@ -1,0 +1,54 @@
+use std::{
+    future::Future,
+    io::{Error, ErrorKind},
+    pin::Pin,
+    str::FromStr,
+    sync::Arc,
+};
+
+use hyper::StatusCode;
+use serde_json::json;
+use uuid::Uuid;
+
+use crate::util::{
+    app::ServerContext,
+    implants::HeartbeatPayload,
+    packet::Packet,
+    router::PacketReply,
+};
+
+pub fn handle(context: Arc<ServerContext>, packet: Packet) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
+    Box::pin(async move {
+        match packet.parse_data::<HeartbeatPayload>() {
+            Ok(payload) => match parse_clientid(packet.clientid()) {
+                Ok(clientid) => match context.implants().update_heartbeat(clientid, payload).await {
+                    Ok(_) => PacketReply::packet(
+                        StatusCode::OK,
+                        packet.opcode_kind(),
+                        packet.clientid(),
+                        &json!({ "status": "ok" }),
+                    ),
+                    Err(err) => error_reply(&packet, StatusCode::NOT_FOUND, &err.to_string()),
+                },
+                Err(err) => error_reply(&packet, StatusCode::BAD_REQUEST, &err.to_string()),
+            },
+            Err(err) => error_reply(&packet, StatusCode::BAD_REQUEST, &err.to_string()),
+        }
+    })
+}
+
+fn parse_clientid(clientid: &str) -> Result<Uuid, Error> {
+    Uuid::from_str(clientid).map_err(|e| Error::new(ErrorKind::InvalidInput, e.to_string()))
+}
+
+fn error_reply(packet: &Packet, status: StatusCode, message: &str) -> PacketReply {
+    PacketReply::packet(
+        status,
+        packet.opcode_kind(),
+        packet.clientid(),
+        &json!({
+            "status": "error",
+            "message": message,
+        }),
+    )
+}

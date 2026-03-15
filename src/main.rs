@@ -1,7 +1,6 @@
 use std::io;
 use std::io::Write;
 use std::error::Error;
-use std::sync::{Arc, Mutex, mpsc};
 
 mod util;
 use util::{
@@ -14,7 +13,7 @@ use util::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 
-    let mut command_handler = CommandHandler::new().await;
+    let command_handler = CommandHandler::new().await;
     
     loop {
 
@@ -29,9 +28,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         else { 
 
-            let cmd = CommandHandler::parse_command(&input);
-            match command_handler.handle(&cmd).await {
-                Ok(_) => continue,
+            match CommandHandler::parse_command(&input) {
+                Ok(cmd) => match command_handler.handle(cmd).await {
+                    Ok(_) => continue,
+                    Err(e) => logger::bad(e.unwrap()),
+                },
                 Err(e) => logger::bad(e.unwrap()),
             }
         }
