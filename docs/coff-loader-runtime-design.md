@@ -12,9 +12,9 @@ It is intentionally narrower than a general implant architecture document. The g
 
 This design builds on:
 
-- [docs/wire-format.md](/C:/Users/wammu/source/repos/malice/docs/wire-format.md)
-- [docs/interop-architecture.md](/C:/Users/wammu/source/repos/malice/docs/interop-architecture.md)
-- [docs/modular-architecture.md](/C:/Users/wammu/source/repos/malice/docs/modular-architecture.md)
+- [docs/wire-format.md](source/repos/malice/docs/wire-format.md)
+- [docs/interop-architecture.md](source/repos/malice/docs/interop-architecture.md)
+- [docs/modular-architecture.md](source/repos/malice/docs/modular-architecture.md)
 
 ## Scope
 
@@ -73,7 +73,7 @@ The first version should remain single-threaded in terms of task execution. Hear
 Recommended internal module layout for the `coff_loader` project:
 
 ```text
-implant/coff_loader/
+implant/zant/
 - runtime/
   - config.h / config.cpp
   - identity.h / identity.cpp

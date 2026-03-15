@@ -18,9 +18,9 @@ impl PayloadRepository {
     pub fn new() -> Self {
         Self {
             search_roots: vec![
-                PathBuf::from("implant/coff_loader/out/build/msvc-debug/payloads"),
-                PathBuf::from("implant/coff_loader/out/build/msvc-release/payloads"),
-                PathBuf::from("implant/coff_loader/out/build/default/payloads"),
+                PathBuf::from("implant/zant/out/build/msvc-debug/payloads"),
+                PathBuf::from("implant/zant/out/build/msvc-release/payloads"),
+                PathBuf::from("implant/zant/out/build/default/payloads"),
             ],
         }
     }
