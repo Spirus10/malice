@@ -18,10 +18,7 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
-use super::{
-    app::ServerContext,
-    packet::Packet,
-};
+use super::{app::ServerContext, packet::Packet};
 
 #[derive(Clone)]
 pub struct HttpServer {
@@ -104,9 +101,7 @@ impl HttpServer {
                     io,
                     service_fn(move |req| {
                         let context = context.clone();
-                        async move {
-                            HttpServer::handle_request(context, req, peer_addr).await
-                        }
+                        async move { HttpServer::handle_request(context, req, peer_addr).await }
                     }),
                 );
 
@@ -130,5 +125,13 @@ impl HttpServer {
 
     pub fn context(&self) -> Arc<ServerContext> {
         self.context.clone()
+    }
+
+    pub fn is_running(&self) -> bool {
+        !self.closed.load(Ordering::Relaxed)
+    }
+
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 }

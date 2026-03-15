@@ -1,11 +1,21 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::util::command::{
-    dispatcher::{info, parse_uuid, show_implant_info, show_implant_list, CommandContext, CommandError},
+    dispatcher::{
+        info, parse_uuid, show_implant_info, show_implant_list, CommandContext, CommandError,
+    },
     parser::{ImplantCommand, ParsedCommand},
 };
 
-pub fn execute(context: Arc<CommandContext>, command: ParsedCommand) -> Pin<Box<dyn Future<Output = Result<(), CommandError>> + Send>> {
+pub fn execute(
+    context: Arc<CommandContext>,
+    command: ParsedCommand,
+) -> Pin<
+    Box<
+        dyn Future<Output = Result<crate::util::command::dispatcher::CommandOutput, CommandError>>
+            + Send,
+    >,
+> {
     Box::pin(async move {
         let ParsedCommand::Implants(command) = command else {
             return Err(CommandError::new("Invalid implants command"));
@@ -15,20 +25,15 @@ pub fn execute(context: Arc<CommandContext>, command: ParsedCommand) -> Pin<Box<
             ImplantCommand::List => {
                 let implants = context.list_implants().await;
                 if implants.is_empty() {
-                    info("No implants registered");
-                    return Ok(());
+                    return Ok(info("No implants registered"));
                 }
 
-                show_implant_list(&implants);
-                Ok(())
+                Ok(show_implant_list(&implants))
             }
             ImplantCommand::Info { clientid } => {
                 let clientid = parse_uuid(&clientid)?;
                 match context.implant_info(&clientid).await {
-                    Some(implant) => {
-                        show_implant_info(&implant);
-                        Ok(())
-                    }
+                    Some(implant) => Ok(show_implant_info(&implant)),
                     None => Err(CommandError::new("Implant not found")),
                 }
             }

@@ -77,7 +77,12 @@ impl TaskRepository {
         leased
     }
 
-    pub async fn complete(&self, task_id: Uuid, status: TaskStatus, result: TaskResultData) -> Option<TaskRecord> {
+    pub async fn complete(
+        &self,
+        task_id: Uuid,
+        status: TaskStatus,
+        result: TaskResultData,
+    ) -> Option<TaskRecord> {
         let mut tasks = self.tasks.lock().await;
         let task = tasks.get_mut(&task_id)?;
         task.status = status;
@@ -88,5 +93,36 @@ impl TaskRepository {
 
     pub async fn get(&self, task_id: &Uuid) -> Option<TaskRecord> {
         self.tasks.lock().await.get(task_id).cloned()
+    }
+
+    pub async fn list_recent(&self, limit: usize) -> Vec<TaskRecord> {
+        let mut tasks: Vec<_> = self.tasks.lock().await.values().cloned().collect();
+        tasks.sort_by(|left, right| {
+            right
+                .completed_at
+                .unwrap_or(right.queued_at)
+                .cmp(&left.completed_at.unwrap_or(left.queued_at))
+        });
+        tasks.truncate(limit);
+        tasks
+    }
+
+    pub async fn list_recent_for_implant(&self, clientid: &Uuid, limit: usize) -> Vec<TaskRecord> {
+        let mut tasks: Vec<_> = self
+            .tasks
+            .lock()
+            .await
+            .values()
+            .filter(|task| &task.clientid == clientid)
+            .cloned()
+            .collect();
+        tasks.sort_by(|left, right| {
+            right
+                .completed_at
+                .unwrap_or(right.queued_at)
+                .cmp(&left.completed_at.unwrap_or(left.queued_at))
+        });
+        tasks.truncate(limit);
+        tasks
     }
 }

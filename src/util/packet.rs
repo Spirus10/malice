@@ -86,7 +86,8 @@ impl Packet {
     }
 
     pub fn parse_data<T: DeserializeOwned>(&self) -> Result<T> {
-        serde_json::from_str(&self.data).map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
+        serde_json::from_str(&self.data)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
     }
 
     pub fn opcode_kind(&self) -> PacketOpcode {
