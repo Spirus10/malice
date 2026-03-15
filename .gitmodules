@@ -1,0 +1,3 @@
+[submodule "implant/coff_loader"]
+	path = implant/coff_loader
+	url = https://github.com/Spirus10/coff_loader.git
