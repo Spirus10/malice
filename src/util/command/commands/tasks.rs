@@ -5,7 +5,15 @@ use crate::util::command::{
     parser::{ParsedCommand, TaskCommand},
 };
 
-pub fn execute(context: Arc<CommandContext>, command: ParsedCommand) -> Pin<Box<dyn Future<Output = Result<(), CommandError>> + Send>> {
+pub fn execute(
+    context: Arc<CommandContext>,
+    command: ParsedCommand,
+) -> Pin<
+    Box<
+        dyn Future<Output = Result<crate::util::command::dispatcher::CommandOutput, CommandError>>
+            + Send,
+    >,
+> {
     Box::pin(async move {
         let ParsedCommand::Tasks(command) = command else {
             return Err(CommandError::new("Invalid task command"));
@@ -19,16 +27,15 @@ pub fn execute(context: Arc<CommandContext>, command: ParsedCommand) -> Pin<Box<
             } => {
                 let clientid = parse_uuid(&clientid)?;
                 let task = context.queue_task(clientid, &task_kind, &args).await?;
-                good(&format!("Queued task {} for {}", task.task_id, task.clientid));
-                Ok(())
+                Ok(good(&format!(
+                    "Queued task {} for {}",
+                    task.task_id, task.clientid
+                )))
             }
             TaskCommand::Result { task_id } => {
                 let task_id = parse_uuid(&task_id)?;
                 match context.task_result(&task_id).await {
-                    Some(task) => {
-                        show_task_result(&task);
-                        Ok(())
-                    }
+                    Some(task) => Ok(show_task_result(&task)),
                     None => Err(CommandError::new("Task not found")),
                 }
             }

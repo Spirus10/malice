@@ -1,6 +1,6 @@
 mod commands;
 mod dispatcher;
-mod output;
+pub mod output;
 mod parser;
 
 pub use dispatcher::CommandHandler;

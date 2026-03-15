@@ -4,18 +4,36 @@ use hyper::StatusCode;
 use serde_json::json;
 
 use crate::util::{
+    activity::ActivitySeverity,
     app::ServerContext,
     packet::Packet,
     router::PacketReply,
-    tasks::TaskResultPayload,
+    tasks::{TaskResultPayload, TaskStatus},
 };
 
-pub fn handle(context: Arc<ServerContext>, packet: Packet) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
+pub fn handle(
+    context: Arc<ServerContext>,
+    packet: Packet,
+) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
     Box::pin(async move {
         match packet.parse_data::<TaskResultPayload>() {
             Ok(payload) => match context.tasks().record_result(payload).await {
                 Ok(task) => {
-                    context.implants().set_active_task(task.clientid, None).await;
+                    context
+                        .implants()
+                        .set_active_task(task.clientid, None)
+                        .await;
+                    context
+                        .record_activity(
+                            match task.status {
+                                TaskStatus::Completed => ActivitySeverity::Success,
+                                _ => ActivitySeverity::Error,
+                            },
+                            format!("completed {} for {}", task.spec.task_type(), task.clientid),
+                            Some(task.clientid),
+                            Some(task.task_id),
+                        )
+                        .await;
                     PacketReply::packet(
                         StatusCode::OK,
                         packet.opcode_kind(),

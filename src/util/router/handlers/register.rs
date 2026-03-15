@@ -11,18 +11,35 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::util::{
-    app::ServerContext,
-    implants::RegisterPayload,
-    packet::Packet,
+    activity::ActivitySeverity, app::ServerContext, implants::RegisterPayload, packet::Packet,
     router::PacketReply,
 };
 
-pub fn handle(context: Arc<ServerContext>, packet: Packet) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
+pub fn handle(
+    context: Arc<ServerContext>,
+    packet: Packet,
+) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
     Box::pin(async move {
         match packet.parse_data::<RegisterPayload>() {
             Ok(payload) => match parse_clientid(packet.clientid()) {
                 Ok(clientid) => {
-                    let record = context.implants().upsert_registration(clientid, payload).await;
+                    let record = context
+                        .implants()
+                        .upsert_registration(clientid, payload)
+                        .await;
+                    context
+                        .record_activity(
+                            ActivitySeverity::Success,
+                            format!(
+                                "registered {} on {}\\{}",
+                                record.identity.clientid,
+                                record.static_metadata.hostname,
+                                record.static_metadata.username
+                            ),
+                            Some(record.identity.clientid),
+                            None,
+                        )
+                        .await;
                     PacketReply::packet(
                         StatusCode::OK,
                         packet.opcode_kind(),

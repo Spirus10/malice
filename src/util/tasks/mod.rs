@@ -6,5 +6,5 @@ mod types;
 
 pub use queue::TaskService;
 pub use types::{
-    FetchTaskRequest, TaskRecord, TaskResultData, TaskResultPayload, TaskSpec,
+    FetchTaskRequest, TaskRecord, TaskResultData, TaskResultPayload, TaskSpec, TaskStatus,
 };

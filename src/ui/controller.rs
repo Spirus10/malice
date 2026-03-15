@@ -1,0 +1,449 @@
+use std::io::{Error, ErrorKind, Result};
+
+use crate::util::{
+    command::CommandHandler,
+    implants::{ImplantCapability, ImplantRecord},
+};
+
+use super::{
+    actions::UiAction,
+    state::{CommandContextMode, Mode, StatusKind, UiState},
+};
+
+pub struct TuiController {
+    handler: CommandHandler,
+}
+
+impl TuiController {
+    pub async fn new() -> Self {
+        Self {
+            handler: CommandHandler::new().await,
+        }
+    }
+
+    pub async fn refresh(&self, state: &mut UiState) -> Result<()> {
+        let context = self.handler.context();
+        let server = context.server_context().await;
+        state.data.server_running = context.server_running().await;
+        state.data.server_addr = context.server_addr().await;
+        state.data.implants = server.list_implants().await;
+        state.apply_filter();
+
+        if state.active_clientid.is_none() {
+            state.activate_selected();
+        }
+
+        if let CommandContextMode::Agent { clientid } = state.command_context {
+            let still_present = state
+                .data
+                .implants
+                .iter()
+                .any(|record| record.identity.clientid == clientid);
+            if !still_present {
+                state.command_context = CommandContextMode::Teamserver;
+                state.mode = Mode::Browse;
+                state.set_status(StatusKind::Error, "bound agent no longer present");
+            }
+        }
+
+        let focus_clientid = match state.command_context {
+            CommandContextMode::Agent { clientid } => Some(clientid),
+            CommandContextMode::Teamserver => state
+                .selected_implant()
+                .map(|record| record.identity.clientid),
+        };
+
+        if let Some(clientid) = focus_clientid {
+            state.data.activity = server.recent_activity_for_implant(&clientid, 8).await;
+            state.data.latest_task = server
+                .recent_tasks_for_implant(&clientid, 1)
+                .await
+                .into_iter()
+                .next();
+        } else {
+            state.data.activity = server.recent_activity(8).await;
+            state.data.latest_task = server.recent_tasks(1).await.into_iter().next();
+        }
+
+        Ok(())
+    }
+
+    pub async fn handle_action(&self, action: UiAction, state: &mut UiState) -> Result<()> {
+        match action {
+            UiAction::Tick | UiAction::Refresh => self.refresh(state).await,
+            UiAction::Quit => {
+                state.should_quit = true;
+                Ok(())
+            }
+            UiAction::SelectNext => {
+                state.select_next();
+                self.refresh(state).await
+            }
+            UiAction::SelectPrevious => {
+                state.select_previous();
+                self.refresh(state).await
+            }
+            UiAction::ActivateSelected => {
+                if state.enter_agent_context() {
+                    if let Some(record) = state.bound_agent() {
+                        state.set_status(
+                            StatusKind::Success,
+                            format!("agent context bound to {}", record.identity.clientid),
+                        );
+                    }
+                    self.refresh(state).await
+                } else {
+                    Err(Error::new(
+                        ErrorKind::NotFound,
+                        "No implant selected to bind",
+                    ))
+                }
+            }
+            UiAction::EnterTeamserverContext => {
+                state.enter_teamserver_context();
+                state.set_status(StatusKind::Info, "teamserver command mode");
+                Ok(())
+            }
+            UiAction::EnterAgentContext => {
+                if state.enter_agent_context() {
+                    if let Some(record) = state.bound_agent() {
+                        state.set_status(
+                            StatusKind::Success,
+                            format!("agent command mode for {}", record.identity.clientid),
+                        );
+                    }
+                    self.refresh(state).await
+                } else {
+                    Err(Error::new(
+                        ErrorKind::NotFound,
+                        "No implant selected to bind",
+                    ))
+                }
+            }
+            UiAction::ToggleCommandContext => self.toggle_command_context(state).await,
+            UiAction::FocusFilter => {
+                state.mode = Mode::Filter;
+                state.set_status(StatusKind::Info, "filter mode");
+                Ok(())
+            }
+            UiAction::OpenHelp => {
+                state.mode = Mode::Help;
+                Ok(())
+            }
+            UiAction::OpenResultViewer => {
+                if state.data.latest_task.is_some() {
+                    state.mode = Mode::ResultViewer;
+                    state.set_status(StatusKind::Info, "latest result viewer");
+                    Ok(())
+                } else {
+                    Err(Error::new(
+                        ErrorKind::NotFound,
+                        "No recent task result available",
+                    ))
+                }
+            }
+            UiAction::CloseOverlay => {
+                state.mode = Mode::Browse;
+                state.teamserver_history_index = None;
+                state.agent_history_index = None;
+                Ok(())
+            }
+            UiAction::Backspace => {
+                match state.mode {
+                    Mode::TeamserverCommand | Mode::AgentCommand => {
+                        if let Some(input) = state.current_input_mut() {
+                            input.pop();
+                        }
+                    }
+                    Mode::Filter => {
+                        state.filter_input.pop();
+                        state.apply_filter();
+                    }
+                    _ => {}
+                }
+                Ok(())
+            }
+            UiAction::SubmitInput => match state.mode {
+                Mode::TeamserverCommand => self.submit_teamserver_command(state).await,
+                Mode::AgentCommand => self.submit_agent_command(state).await,
+                Mode::Filter => {
+                    state.mode = Mode::Browse;
+                    self.refresh(state).await
+                }
+                _ => Ok(()),
+            },
+            UiAction::AddChar(c) => {
+                match state.mode {
+                    Mode::TeamserverCommand | Mode::AgentCommand => {
+                        if let Some(input) = state.current_input_mut() {
+                            input.push(c);
+                        }
+                    }
+                    Mode::Filter => {
+                        state.filter_input.push(c);
+                        state.apply_filter();
+                    }
+                    _ => {}
+                }
+                Ok(())
+            }
+            UiAction::HistoryPrevious => {
+                match state.mode {
+                    Mode::TeamserverCommand => self.move_teamserver_history(state, -1),
+                    Mode::AgentCommand => self.move_agent_history(state, -1),
+                    _ => {}
+                }
+                Ok(())
+            }
+            UiAction::HistoryNext => {
+                match state.mode {
+                    Mode::TeamserverCommand => self.move_teamserver_history(state, 1),
+                    Mode::AgentCommand => self.move_agent_history(state, 1),
+                    _ => {}
+                }
+                Ok(())
+            }
+            UiAction::OpenTaskMenu => {
+                state.mode = Mode::TaskMenu;
+                state.task_menu_index = 0;
+                Ok(())
+            }
+            UiAction::TaskMenuNext => {
+                state.task_menu_index = (state.task_menu_index + 1).min(1);
+                Ok(())
+            }
+            UiAction::TaskMenuPrevious => {
+                state.task_menu_index = state.task_menu_index.saturating_sub(1);
+                Ok(())
+            }
+            UiAction::ConfirmTaskMenu => self.confirm_task_menu(state).await,
+        }
+    }
+
+    async fn toggle_command_context(&self, state: &mut UiState) -> Result<()> {
+        match state.command_context {
+            CommandContextMode::Teamserver => {
+                if state.enter_agent_context() {
+                    if let Some(record) = state.bound_agent() {
+                        state.set_status(
+                            StatusKind::Success,
+                            format!("agent command mode for {}", record.identity.clientid),
+                        );
+                    }
+                    self.refresh(state).await
+                } else {
+                    Err(Error::new(
+                        ErrorKind::NotFound,
+                        "No implant selected to bind",
+                    ))
+                }
+            }
+            CommandContextMode::Agent { .. } => {
+                state.enter_teamserver_context();
+                state.set_status(StatusKind::Info, "teamserver command mode");
+                Ok(())
+            }
+        }
+    }
+
+    fn move_teamserver_history(&self, state: &mut UiState, delta: isize) {
+        if state.teamserver_history.is_empty() {
+            return;
+        }
+
+        let next = match state.teamserver_history_index {
+            Some(index) => index
+                .saturating_add_signed(delta)
+                .min(state.teamserver_history.len() - 1),
+            None if delta < 0 => state.teamserver_history.len() - 1,
+            None => 0,
+        };
+
+        state.teamserver_history_index = Some(next);
+        state.teamserver_input = state.teamserver_history[next].clone();
+    }
+
+    fn move_agent_history(&self, state: &mut UiState, delta: isize) {
+        if state.agent_history.is_empty() {
+            return;
+        }
+
+        let next = match state.agent_history_index {
+            Some(index) => index
+                .saturating_add_signed(delta)
+                .min(state.agent_history.len() - 1),
+            None if delta < 0 => state.agent_history.len() - 1,
+            None => 0,
+        };
+
+        state.agent_history_index = Some(next);
+        state.agent_input = state.agent_history[next].clone();
+    }
+
+    async fn confirm_task_menu(&self, state: &mut UiState) -> Result<()> {
+        match state.task_menu_index {
+            0 => self.queue_whoami(state).await,
+            1 => {
+                if let Some(task) = &state.data.latest_task {
+                    state.teamserver_input = format!("task result {}", task.task_id);
+                    state.enter_teamserver_context();
+                    state.set_status(StatusKind::Info, "latest task command inserted");
+                } else {
+                    state.mode = Mode::Browse;
+                    state.set_status(StatusKind::Error, "no recent task for selection");
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn queue_whoami(&self, state: &mut UiState) -> Result<()> {
+        let record = self.bound_agent_record(state)?;
+        self.ensure_execute_coff(record)?;
+
+        let task = self
+            .handler
+            .context()
+            .queue_task(
+                record.identity.clientid,
+                "execute_coff",
+                &["whoami".to_string(), "main".to_string()],
+            )
+            .await
+            .map_err(|err| Error::other(err.to_string()))?;
+
+        state.agent_output = vec![
+            format!("queued whoami for {}", task.clientid),
+            format!("task_id {}", task.task_id),
+        ];
+        state.agent_input.clear();
+        state.mode = Mode::Browse;
+        state.set_status(StatusKind::Success, "queued whoami");
+        self.refresh(state).await
+    }
+
+    async fn submit_teamserver_command(&self, state: &mut UiState) -> Result<()> {
+        let input = state.teamserver_input.trim().to_string();
+        if input.is_empty() {
+            state.mode = Mode::Browse;
+            return Ok(());
+        }
+
+        let resolved = self.resolve_aliases(&input, state)?;
+        let parsed = CommandHandler::parse_command(&resolved)
+            .map_err(|err| Error::new(ErrorKind::InvalidInput, err.to_string()))?;
+        let output = self
+            .handler
+            .handle(parsed)
+            .await
+            .map_err(|err| Error::other(err.to_string()))?;
+
+        state.teamserver_output = output.as_lines().to_vec();
+        state.push_teamserver_history(input);
+        state.teamserver_input.clear();
+        state.mode = Mode::Browse;
+        state.set_status(StatusKind::Success, "teamserver command executed");
+        self.refresh(state).await
+    }
+
+    async fn submit_agent_command(&self, state: &mut UiState) -> Result<()> {
+        let input = state.agent_input.trim().to_ascii_lowercase();
+        if input.is_empty() {
+            state.mode = Mode::Browse;
+            return Ok(());
+        }
+
+        match input.as_str() {
+            "whoami" => {
+                state.push_agent_history(input);
+                self.queue_whoami(state).await
+            }
+            "help" => {
+                state.agent_output = self.agent_help_lines(state);
+                state.push_agent_history(input);
+                state.agent_input.clear();
+                state.mode = Mode::Browse;
+                state.set_status(StatusKind::Info, "agent help");
+                Ok(())
+            }
+            "back" => {
+                state.push_agent_history(input);
+                state.agent_input.clear();
+                state.enter_teamserver_context();
+                state.set_status(StatusKind::Info, "returned to teamserver command mode");
+                Ok(())
+            }
+            _ => {
+                let supported = state.supported_agent_commands();
+                state.set_status(
+                    StatusKind::Error,
+                    if supported.is_empty() {
+                        "no agent commands available for this implant"
+                    } else {
+                        "unsupported agent command"
+                    },
+                );
+                Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "unsupported agent command",
+                ))
+            }
+        }
+    }
+
+    fn resolve_aliases(&self, input: &str, state: &UiState) -> Result<String> {
+        let mut parts: Vec<String> = input.split_whitespace().map(str::to_string).collect();
+        match parts.as_mut_slice() {
+            [command, subcommand, clientid, ..] if command == "task" && subcommand == "queue" => {
+                *clientid = self.resolve_target(clientid, state)?;
+            }
+            [command, subcommand, clientid] if command == "implants" && subcommand == "info" => {
+                *clientid = self.resolve_target(clientid, state)?;
+            }
+            _ => {}
+        }
+        Ok(parts.join(" "))
+    }
+
+    fn resolve_target(&self, token: &str, state: &UiState) -> Result<String> {
+        if token != "active" && token != "selected" {
+            return Ok(token.to_string());
+        }
+
+        state
+            .active_implant()
+            .map(|record| record.identity.clientid.to_string())
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "No active implant selected"))
+    }
+
+    fn bound_agent_record<'a>(&self, state: &'a UiState) -> Result<&'a ImplantRecord> {
+        state
+            .bound_agent()
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "No bound implant selected"))
+    }
+
+    fn ensure_execute_coff(&self, record: &ImplantRecord) -> Result<()> {
+        if record.supports(ImplantCapability::ExecuteCoff) {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Selected implant does not support whoami",
+            ))
+        }
+    }
+
+    fn agent_help_lines(&self, state: &UiState) -> Vec<String> {
+        let mut lines = vec!["supported agent commands:".to_string()];
+        let supported = state.supported_agent_commands();
+        if supported.is_empty() {
+            lines.push("none".to_string());
+        } else {
+            lines.extend(supported.into_iter().map(str::to_string));
+        }
+        lines.push("help".to_string());
+        lines.push("back".to_string());
+        lines
+    }
+}

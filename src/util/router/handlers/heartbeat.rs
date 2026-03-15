@@ -11,25 +11,42 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::util::{
-    app::ServerContext,
-    implants::HeartbeatPayload,
-    packet::Packet,
+    activity::ActivitySeverity, app::ServerContext, implants::HeartbeatPayload, packet::Packet,
     router::PacketReply,
 };
 
-pub fn handle(context: Arc<ServerContext>, packet: Packet) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
+pub fn handle(
+    context: Arc<ServerContext>,
+    packet: Packet,
+) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
     Box::pin(async move {
         match packet.parse_data::<HeartbeatPayload>() {
             Ok(payload) => match parse_clientid(packet.clientid()) {
-                Ok(clientid) => match context.implants().update_heartbeat(clientid, payload).await {
-                    Ok(_) => PacketReply::packet(
-                        StatusCode::OK,
-                        packet.opcode_kind(),
-                        packet.clientid(),
-                        &json!({ "status": "ok" }),
-                    ),
-                    Err(err) => error_reply(&packet, StatusCode::NOT_FOUND, &err.to_string()),
-                },
+                Ok(clientid) => {
+                    match context.implants().update_heartbeat(clientid, payload).await {
+                        Ok(record) => {
+                            context
+                                .record_activity(
+                                    ActivitySeverity::Info,
+                                    format!(
+                                        "heartbeat {} status={}",
+                                        record.identity.clientid,
+                                        record.runtime_state.current_status
+                                    ),
+                                    Some(record.identity.clientid),
+                                    None,
+                                )
+                                .await;
+                            PacketReply::packet(
+                                StatusCode::OK,
+                                packet.opcode_kind(),
+                                packet.clientid(),
+                                &json!({ "status": "ok" }),
+                            )
+                        }
+                        Err(err) => error_reply(&packet, StatusCode::NOT_FOUND, &err.to_string()),
+                    }
+                }
                 Err(err) => error_reply(&packet, StatusCode::BAD_REQUEST, &err.to_string()),
             },
             Err(err) => error_reply(&packet, StatusCode::BAD_REQUEST, &err.to_string()),

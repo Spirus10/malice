@@ -60,7 +60,12 @@ pub enum TaskSpec {
 }
 
 impl TaskSpec {
-    pub fn execute_coff(object_name: String, object_bytes: Vec<u8>, entrypoint: String, args: Vec<u8>) -> Self {
+    pub fn execute_coff(
+        object_name: String,
+        object_bytes: Vec<u8>,
+        entrypoint: String,
+        args: Vec<u8>,
+    ) -> Self {
         Self::ExecuteCoff(ExecuteCoffTask {
             object_name,
             object_bytes,
@@ -84,10 +89,7 @@ impl TaskSpec {
 
 #[derive(Debug, Clone)]
 pub enum TaskResultData {
-    Text {
-        encoding: String,
-        data: String,
-    },
+    Text { encoding: String, data: String },
 }
 
 #[derive(Debug, Clone)]

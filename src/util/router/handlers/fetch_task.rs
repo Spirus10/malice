@@ -11,24 +11,43 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::util::{
-    app::ServerContext,
-    packet::Packet,
-    router::PacketReply,
+    activity::ActivitySeverity, app::ServerContext, packet::Packet, router::PacketReply,
     tasks::FetchTaskRequest,
 };
 
-pub fn handle(context: Arc<ServerContext>, packet: Packet) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
+pub fn handle(
+    context: Arc<ServerContext>,
+    packet: Packet,
+) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
     Box::pin(async move {
         match packet.parse_data::<FetchTaskRequest>() {
             Ok(request) => match parse_clientid(packet.clientid()) {
                 Ok(clientid) => {
-                    let response = context.tasks().fetch_tasks(clientid, request.want.unwrap_or(1)).await;
+                    let response = context
+                        .tasks()
+                        .fetch_tasks(clientid, request.want.unwrap_or(1))
+                        .await;
                     context
                         .implants()
                         .set_active_task(clientid, response.tasks.first().map(|task| task.task_id))
                         .await;
+                    if let Some(task) = response.tasks.first() {
+                        context
+                            .record_activity(
+                                ActivitySeverity::Info,
+                                format!("leased {} for {}", task.task_type, clientid),
+                                Some(clientid),
+                                Some(task.task_id),
+                            )
+                            .await;
+                    }
 
-                    PacketReply::packet(StatusCode::OK, packet.opcode_kind(), packet.clientid(), &response)
+                    PacketReply::packet(
+                        StatusCode::OK,
+                        packet.opcode_kind(),
+                        packet.clientid(),
+                        &response,
+                    )
                 }
                 Err(err) => error_reply(&packet, StatusCode::BAD_REQUEST, &err.to_string()),
             },

@@ -42,10 +42,14 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
             _ => Err("Usage: tcpserver start|stop".to_string()),
         },
         "implants" => match args.as_slice() {
-            [subcommand] if subcommand == "list" => Ok(ParsedCommand::Implants(ImplantCommand::List)),
-            [subcommand, clientid] if subcommand == "info" => Ok(ParsedCommand::Implants(ImplantCommand::Info {
-                clientid: clientid.clone(),
-            })),
+            [subcommand] if subcommand == "list" => {
+                Ok(ParsedCommand::Implants(ImplantCommand::List))
+            }
+            [subcommand, clientid] if subcommand == "info" => {
+                Ok(ParsedCommand::Implants(ImplantCommand::Info {
+                    clientid: clientid.clone(),
+                }))
+            }
             _ => Err("Usage: implants list | implants info <clientid>".to_string()),
         },
         "task" => match args.as_slice() {
@@ -56,10 +60,15 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
                     args: rest.to_vec(),
                 }))
             }
-            [subcommand, task_id] if subcommand == "result" => Ok(ParsedCommand::Tasks(TaskCommand::Result {
-                task_id: task_id.clone(),
-            })),
-            _ => Err("Usage: task queue <clientid> <task-kind> [args..] | task result <taskid>".to_string()),
+            [subcommand, task_id] if subcommand == "result" => {
+                Ok(ParsedCommand::Tasks(TaskCommand::Result {
+                    task_id: task_id.clone(),
+                }))
+            }
+            _ => Err(
+                "Usage: task queue <clientid> <task-kind> [args..] | task result <taskid>"
+                    .to_string(),
+            ),
         },
         "exit" => Ok(ParsedCommand::Exit),
         _ => Err(format!("Unknown command: {command}")),

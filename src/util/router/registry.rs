@@ -40,7 +40,10 @@ impl PacketRouter {
 
     pub async fn route(&self, packet: Packet) -> PacketReply {
         let Some(context) = self.context.upgrade() else {
-            return PacketReply::text(StatusCode::INTERNAL_SERVER_ERROR, "Server context unavailable");
+            return PacketReply::text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Server context unavailable",
+            );
         };
 
         match self.handlers.get(&packet.opcode_kind()) {

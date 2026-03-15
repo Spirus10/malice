@@ -25,7 +25,11 @@ impl TaskService {
         }
     }
 
-    pub async fn queue_task_for_implant(&self, implant: &ImplantRecord, spec: TaskSpec) -> Result<TaskRecord> {
+    pub async fn queue_task_for_implant(
+        &self,
+        implant: &ImplantRecord,
+        spec: TaskSpec,
+    ) -> Result<TaskRecord> {
         let required = spec.required_capability();
         if !implant.supports(required) {
             return Err(Error::new(
@@ -38,7 +42,10 @@ impl TaskService {
             ));
         }
 
-        Ok(self.repository.insert_queued(implant.identity.clientid, spec).await)
+        Ok(self
+            .repository
+            .insert_queued(implant.identity.clientid, spec)
+            .await)
     }
 
     pub async fn fetch_tasks(&self, clientid: Uuid, want: usize) -> FetchTaskResponse {
@@ -62,11 +69,23 @@ impl TaskService {
     pub async fn get(&self, task_id: &Uuid) -> Option<TaskRecord> {
         self.repository.get(task_id).await
     }
+
+    pub async fn recent(&self, limit: usize) -> Vec<TaskRecord> {
+        self.repository.list_recent(limit).await
+    }
+
+    pub async fn recent_for_implant(&self, clientid: &Uuid, limit: usize) -> Vec<TaskRecord> {
+        self.repository
+            .list_recent_for_implant(clientid, limit)
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::util::implants::{ImplantCapability, ImplantRecord, ImplantRegistry, RegisterPayload};
+    use crate::util::implants::{
+        ImplantCapability, ImplantRecord, ImplantRegistry, RegisterPayload,
+    };
     use crate::util::tasks::TaskResultData;
 
     use super::*;
@@ -113,7 +132,12 @@ mod tests {
         let result = service
             .queue_task_for_implant(
                 &implant,
-                TaskSpec::execute_coff("whoami.obj".to_string(), vec![0x41], "main".to_string(), Vec::new()),
+                TaskSpec::execute_coff(
+                    "whoami.obj".to_string(),
+                    vec![0x41],
+                    "main".to_string(),
+                    Vec::new(),
+                ),
             )
             .await;
 
@@ -128,7 +152,12 @@ mod tests {
         let task = service
             .queue_task_for_implant(
                 &implant,
-                TaskSpec::execute_coff("whoami.obj".to_string(), vec![0x41], "main".to_string(), Vec::new()),
+                TaskSpec::execute_coff(
+                    "whoami.obj".to_string(),
+                    vec![0x41],
+                    "main".to_string(),
+                    Vec::new(),
+                ),
             )
             .await
             .unwrap();

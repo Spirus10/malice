@@ -1,14 +1,14 @@
 # Ratatui TUI Design
 
-This document proposes a `ratatui`-based terminal UI for the teamserver.
+This document describes the `ratatui`-based terminal UI for the teamserver.
 
-The goal is to replace the current UUID-heavy command flow with an operator interface that is:
+The TUI exists to replace the UUID-heavy CLI workflow with an operator interface that is:
 
 - navigable
 - glanceable
 - keyboard-driven
 - compatible with the current teamserver architecture
-- extensible without collapsing back into one large UI module
+- extensible without collapsing into one large UI module
 
 This design assumes the current Rust teamserver structure described in:
 
@@ -17,72 +17,93 @@ This design assumes the current Rust teamserver structure described in:
 
 ## Problem Statement
 
-The current CLI works, but the operator experience is poor:
+The original CLI works, but the operator experience is weak:
 
 - implants are identified by UUID, which forces copy/paste
 - there is no persistent active implant selection
 - host metadata is only visible after a separate info command
-- the tasking workflow is detached from implant navigation
+- tasking is detached from implant navigation
 - command history and command context are not visible together
+- there is no strong distinction between global teamserver commands and implant-bound actions
 
-This increases friction for routine workflows such as:
+Once an operator selects an implant, their working mode changes. They are no longer just browsing. They are tasking one target.
 
-- checking which implants are alive
-- selecting one implant
-- queueing a task against it
-- reviewing the result
+The TUI should reflect that shift.
 
 ## Goals
 
-- present active implants in a navigable list
+- present implants in a navigable list
 - allow one implant to be selected as the active context
-- show key host and runtime information without requiring extra commands
-- keep a command interpreter pane for freeform or advanced operator actions
+- show key host and runtime information without extra commands
+- preserve a teamserver command interpreter for global commands
+- provide a larger implant-bound command workspace once one agent is selected for tasking
+- expose only commands the bound implant can actually run
 - support keyboard-only operation
 - preserve modularity between UI, application state, and command/task services
 
 ## Non-Goals
 
 - mouse-first interaction
-- embedded graphical widgets beyond terminal UI
-- full-screen text editor behavior
+- graphical widgets beyond terminal UI
+- a full-screen text editor experience
 - replacing the underlying command/task architecture
 - implementing persistence or multi-user coordination in this phase
+- inventing a freeform remote shell language for implants
 
-## High-Level UI Layout
+## High-Level Layout
 
-Recommended initial layout:
+Recommended browse or teamserver layout:
 
 ```text
 +-----------------------------------------------------------+
 | Header                                                    |
-| server status | active implant | filters | mode           |
+| server | active implant | filters | context | focus       |
 +-----------------------------+-----------------------------+
 | Implants                     | Implant Details            |
-|                             |                             |
 | [list / table]              | host, user, pid, process   |
-|                             | os, arch, first seen       |
-|                             | last heartbeat, status     |
+|                             | os, arch, seen, status     |
 |                             | capabilities, active task  |
-|                             |                             |
-+-----------------------------+-----------------------------+
-| Task / Activity Panel                                     |
-| recent task queueing | results | events                   |
 +-----------------------------------------------------------+
-| Command Interpreter                                       |
-| > task queue active execute_coff whoami main              |
+| Activity / Result Preview                                  |
 +-----------------------------------------------------------+
-| Status / Key Hints                                        |
-| j/k move | enter select | : command | q quit | ? help     |
-+-----------------------------------------------------------+
+| Teamserver Commands                                        |
+| teamserver> tcpserver start                                |
++--------------------+--------------------------------------+
+| Status             | Key Hints                            |
++--------------------+--------------------------------------+
 ```
 
-This gives the operator:
+Recommended implant tasking layout:
 
-- a stable implant inventory view
-- a stable detail panel for the selected implant
-- a command line for advanced actions
-- a visible place for recent system events and task results
+```text
++-----------------------------------------------------------+
+| Header                                                    |
+| server | active implant | filters | context=agent         |
++-----------------------------+-----------------------------+
+| Implants                     | Implant Details            |
+| [list / table]              | host, user, pid, process   |
+|                             | os, arch, seen, status     |
+|                             | capabilities, active task  |
++-----------------------------------------------------------+
+| Activity / Result Preview                                  |
++-----------------------------------------------------------+
+| Agent Commands [bound client]                              |
+| bound to <clientid>                                        |
+| supported: whoami, help, back                              |
+|                                                            |
+| agent> whoami                                              |
+|                                                            |
+| queued task / latest result / recent errors                |
++--------------------+--------------------------------------+
+| Status             | Key Hints                            |
++--------------------+--------------------------------------+
+```
+
+Important layout rule:
+
+- the command pane is short in teamserver context
+- the command pane becomes larger in agent context
+- the larger pane is bound to one explicit implant, not to the transient cursor row
 
 ## Primary Panes
 
@@ -90,14 +111,13 @@ This gives the operator:
 
 Purpose:
 
-- show the current implant inventory
+- show the implant inventory
 - allow fast navigation
-- support filtering and sorting
-- establish the active implant context
+- establish the selected implant
+- provide the source row for agent binding
 
 Recommended columns:
 
-- marker for selected row
 - short client identifier
 - hostname
 - username
@@ -109,17 +129,14 @@ Recommended columns:
 Recommended behavior:
 
 - arrow keys or `j`/`k` move selection
-- `Enter` sets active implant
+- `Enter` binds the selected implant and enters agent command mode
 - `/` starts local filtering
-- `s` cycles sort mode
 - `r` refreshes immediately
 
 Important design choice:
 
-- show a shortened client ID in the table by default
-- keep the full UUID visible in the details pane
-
-That eliminates most copy/paste without hiding exact identity.
+- show a short client ID in the table
+- show the full UUID in the details pane and agent command pane
 
 ### 2. Implant Details Pane
 
@@ -148,24 +165,23 @@ Recommended fields:
 
 Recommended actions shown as hints:
 
-- `i` inspect full implant info
-- `t` open task actions
-- `c` focus command line with active implant inserted
+- `Enter` bind selected implant
+- `a` open agent commands
+- `:` open teamserver commands
 
-### 3. Task / Activity Pane
+### 3. Activity / Result Pane
 
 Purpose:
 
 - show operator-relevant recent activity without leaving the main screen
+- show the latest task/result preview for the currently relevant context
 
 Recommended content:
 
 - recent task queue actions
 - recent task completions
 - recent error events
-- result preview for the selected implant's latest task
-
-This should be event-oriented, not a raw log dump.
+- result preview for the selected or bound implant
 
 Suggested event line format:
 
@@ -173,64 +189,168 @@ Suggested event line format:
 [19:01:51] completed execute_coff whoami -> WAMMU-PC\wammu
 ```
 
-### 4. Command Interpreter Pane
+### 4. Command Pane
+
+The TUI should have two distinct command contexts:
+
+1. `Teamserver`
+2. `Agent`
+
+These are not the same thing and should not be presented as the same thing.
+
+#### Teamserver Command Context
 
 Purpose:
 
-- preserve power-user and future advanced workflows
-- allow freeform commands without forcing every action into menus
+- manage the server
+- inspect global state
+- perform administrative or diagnostic actions not tied to one implant
 
 Recommended behavior:
 
-- `:` focuses command mode
-- current active implant can be referenced symbolically
-- command history available via up/down arrows
-- tab completion for command verbs and selected contextual values
+- `:` enters teamserver command mode
+- use the existing parser and command handlers
+- keep teamserver command history separate from agent command history
+- keep the pane relatively short in this context
 
-Recommended symbolic aliases:
+Example commands:
 
-- `active`
-- `selected`
-- later: named tags or groups
+- `tcpserver start`
+- `tcpserver stop`
+- `implants list`
+- `implants info active`
+- `task result <taskid>`
 
-Example:
+#### Agent Command Context
+
+Purpose:
+
+- bind the command workspace to one specific implant
+- expose only supported implant actions
+- keep command and result flow for one implant in one place
+
+Recommended behavior:
+
+- `Enter` or `a` binds the selected implant and enters agent command mode
+- the command pane grows vertically when an implant is bound
+- browsing another row does not silently retarget the bound implant
+- `Tab`, `:`, or `back` returns to teamserver command mode
+
+Important design rule:
+
+- agent mode should expose operator-facing verbs, not raw teamserver syntax
+
+First agent command set:
 
 ```text
-task queue active execute_coff whoami main
+whoami
+help
+back
 ```
 
-The TUI should resolve `active` to the selected implant UUID before dispatch.
+`whoami` is the only real implant task currently implemented.
 
-This preserves the existing command architecture while removing the worst ergonomics.
+The UI may internally translate:
+
+```text
+whoami
+```
+
+into:
+
+```text
+task queue <clientid> execute_coff whoami main
+```
+
+That translation belongs in the controller/service layer, not in the widget.
 
 ## Interaction Model
-
-The TUI should be modal only where necessary.
 
 Recommended modes:
 
 - `Browse`
   - default
   - implant list navigation
-- `Command`
-  - command input focused
+- `TeamserverCommand`
+  - teamserver command input focused
+- `AgentCommand`
+  - implant-bound command input focused
 - `Filter`
   - implant list filtering
 - `Help`
   - keybinding reference
 
-Avoid Vim-style deep modal complexity. The UI should remain predictable.
+The UI should be modal only where needed. Avoid deep Vim-style modal behavior.
 
-## Ergonomic Flow
+## Context Model
 
-### Common Flow: Queue A Task
+The TUI should explicitly track command scope.
 
-Recommended operator path:
+Recommended state:
+
+```text
+enum CommandContextMode {
+    Teamserver,
+    Agent { clientid: Uuid },
+}
+```
+
+This binding must live in `ui::state`.
+
+Do not infer command context indirectly from cursor position alone.
+
+Recommended semantics:
+
+- moving the cursor changes selection
+- binding an agent is explicit
+- the bound agent remains the command target until the operator switches away
+- cursor movement must not silently retarget an already bound agent context
+
+## Capability-Gated Agent Commands
+
+The agent command set must derive from implant capabilities.
+
+The current backend already models capabilities on `ImplantRecord`.
+
+That should drive:
+
+- which commands appear in the agent workspace
+- which quick actions are enabled
+- which completions are available
+- which manual submissions are accepted
+
+### First Version
+
+First version command map:
+
+- if implant supports `ExecuteCoff`, expose `whoami`
+
+That means the UI-visible command list is:
+
+```text
+whoami
+```
+
+If the implant does not support that capability:
+
+- the agent workspace should show no runnable implant commands
+- the UI should still allow `help` and `back`
+- manual submission of unsupported implant commands should be rejected with a clear status message
+
+Important rule:
+
+- widgets present
+- controller validates
+- service layer remains authoritative
+
+## Ergonomic Flows
+
+### Queue A Task
 
 1. open TUI
-2. use implant list to select an implant
-3. press `t` for task actions or `:` for command mode
-4. choose `execute_coff -> whoami` or type `task queue active execute_coff whoami main`
+2. navigate the implant list
+3. press `Enter` or `a` to bind the selected implant
+4. type `whoami`
 5. activity pane shows queued and completed state
 6. result preview updates automatically
 
@@ -242,87 +362,38 @@ This is substantially better than:
 - copy task ID
 - `task result <taskid>`
 
-### Common Flow: Review Implant State
+### Return To Teamserver Commands
 
-1. navigate implant list
+1. bind an implant and task it in agent mode
+2. press `Tab` or `:`
+3. teamserver command pane becomes active again
+4. run global commands without losing implant situational awareness
+
+### Review Implant State
+
+1. navigate the implant list
 2. details pane updates immediately
-3. recent activity pane shows recent tasks/errors for that implant
+3. activity pane shows recent tasks and errors for the selected or bound implant
 
-### Common Flow: Recover From Failure
+## Keybindings
 
-1. activity pane highlights recent error
-2. selected implant remains visible
-3. operator can re-task from the same context
-
-## Recommended UI Features
-
-### Active Implant Context
-
-The TUI should maintain an active implant separate from transient cursor movement if needed.
-
-This allows:
-
-- browsing one implant while keeping another as the command target
-- explicit operator control over command targeting
-
-Recommended first version:
-
-- selection and active implant are the same
-
-Future extension:
-
-- `Space` marks active implant
-- cursor can move independently
-
-### Short ID Display
-
-Display a short ID in the list, for example:
-
-```text
-a1f4acb4
-```
-
-but show the full UUID in details and copy/export actions.
-
-### Result Preview
-
-For the selected implant, show:
-
-- latest task kind
-- current task state
-- most recent result snippet
-
-This avoids forcing a separate result query for common cases.
-
-### Inline Actions
-
-Recommended keybindings for first version:
+Recommended keybindings:
 
 - `q` quit
-- `j` / `k` or arrow keys: move
-- `Enter`: select implant
-- `:`: command mode
-- `/`: filter implants
-- `r`: refresh
-- `t`: task actions
-- `i`: implant details focus
-- `?`: help
-
-### Command Completion
-
-Recommended completion targets:
-
-- top-level command verbs
-- subcommands
-- task kinds
-- payload names
-- `active`
-
-This is one of the highest-value ergonomic wins.
+- `j` / `k` or arrow keys move selection
+- `Enter` bind selected implant and enter agent command mode
+- `a` enter agent command mode for selected implant
+- `:` enter teamserver command mode
+- `Tab` switch between teamserver and agent command contexts
+- `/` filter implants
+- `r` refresh
+- `t` open task actions
+- `?` help
+- `Esc` return to browse
 
 ## Task Action UX
 
-A task action overlay or popup is preferable to forcing every task through raw command input.
+A task action overlay or popup is still useful for common actions.
 
 Recommended initial task menu:
 
@@ -330,23 +401,18 @@ Recommended initial task menu:
 Task Actions
 - execute_coff / whoami
 - view latest result
-- copy full client ID
 ```
 
-Future task kinds can be added here without changing the command pane.
+Task actions should also be driven by implant capabilities.
 
-This should be driven by implant capabilities when possible.
+If the selected or bound implant does not support a task kind:
 
-If the selected implant does not support a task kind:
-
-- disable it visually
-- explain why
-
-That aligns with the teamserver capability-aware design.
+- disable it visually or reject it with a clear explanation
+- keep the service layer as the final authority
 
 ## Data Flow And Architecture
 
-The TUI should not bypass the current application/service layer.
+The TUI should not bypass the existing application or service layer.
 
 Recommended architecture:
 
@@ -356,14 +422,14 @@ ui/
 - state.rs
 - events.rs
 - layout.rs
+- actions.rs
+- controller.rs
 - widgets/
   - implants.rs
   - details.rs
   - activity.rs
   - command.rs
   - help.rs
-- actions.rs
-- controller.rs
 ```
 
 ### Responsibilities
@@ -372,17 +438,21 @@ ui/
 
 - local UI state only:
   - selected row
-  - focused pane
+  - focused mode
   - filter text
-  - command buffer
-  - command history cursor
-  - activity scroll offset
+  - command context binding
+  - teamserver command buffer
+  - teamserver command history cursor
+  - agent command buffer
+  - agent command history cursor
 
 `ui::controller`
 
 - translates key events into actions
 - requests data from application services
 - dispatches commands
+- validates capability-gated agent commands
+- maps agent verbs to typed service calls
 
 `ui::widgets`
 
@@ -394,44 +464,42 @@ ui/
 - typed UI actions such as:
   - `SelectNextImplant`
   - `SelectPreviousImplant`
+  - `EnterAgentContext`
+  - `EnterTeamserverContext`
+  - `ToggleCommandContext`
   - `QueueWhoami`
-  - `FocusCommand`
-  - `SubmitCommand`
+  - `SubmitTeamserverCommand`
+  - `SubmitAgentCommand`
 
 ## Integration With Existing Command System
 
 The current command system is already modular.
 
-That is useful because the TUI can treat the command interpreter as a frontend over the same command dispatcher.
-
 Recommended integration:
 
-- reuse current parser and command handlers where possible
-- add a thin adapter that resolves `active` into a concrete UUID before command parsing
-- expose typed service calls for common UI actions rather than shelling everything through raw strings
+- reuse the existing parser and command handlers for teamserver commands
+- resolve `active` into a concrete UUID before teamserver command parsing
+- call typed services directly for common UI actions
+- do not parse agent commands through the raw teamserver parser
+- add a thin agent command adapter that maps:
+  - `whoami` -> typed `execute_coff whoami` queue call
 
 Important design rule:
 
-- common actions should call typed services directly
-- command pane should remain available for advanced and fallback workflows
-
-That keeps the UI ergonomic without making it rigid.
+- teamserver commands keep the existing syntax
+- agent commands keep a narrower operator-facing vocabulary
 
 ## Refresh Strategy
 
-The UI needs periodic data refresh without flicker or blocking input.
+The UI needs periodic refresh without blocking input.
 
 Recommended model:
 
 - event loop polls input frequently
-- background tick every 250ms to 1000ms
+- background UI tick every 250ms
+- data refresh tick every 1s
 - implant list refresh on tick
 - activity updates on task or heartbeat changes
-
-Recommended first refresh intervals:
-
-- UI render tick: 100ms to 250ms
-- data refresh tick: 1s
 
 Do not tie rendering directly to network or database access.
 
@@ -449,28 +517,27 @@ Recommended event categories:
 - command error
 - transport/server error
 
-The activity pane can render this event stream with severity-aware styling.
+The activity pane should render this with severity-aware styling.
 
 ## Styling And Visual Language
 
-For a terminal UI, visual clarity matters more than novelty.
+For a terminal UI, clarity matters more than novelty.
 
 Recommended style guidance:
 
 - strong pane borders and titles
 - selected implant row visibly highlighted
+- clear distinction between teamserver and agent command panes
 - status colors:
-  - idle/healthy: green
-  - busy: yellow
+  - healthy/success: green
+  - informational: cyan or blue
   - error/offline: red
-- recent event severities similarly color-coded
-- command pane should feel distinct but not dominant
 
 Avoid:
 
 - excessive color noise
 - dense borders everywhere
-- scrolling regions without focus indicators
+- context switching without visible labels
 
 ## Extensibility Recommendations
 
@@ -481,10 +548,8 @@ Do not make widgets fetch application state directly.
 Instead:
 
 - controller gathers data
-- controller updates a UI view model
+- controller updates UI state or view-model data
 - widgets render the view model
-
-This keeps the UI testable and avoids hidden coupling.
 
 ### 2. Use Typed UI Actions
 
@@ -493,20 +558,16 @@ Avoid giant key-handling match blocks that directly mutate everything.
 Prefer:
 
 ```text
-KeyEvent -> UiAction -> reducer/controller -> state update + service call
+KeyEvent -> UiAction -> controller -> state update + service call
 ```
-
-This makes future panes and commands additive.
 
 ### 3. Capability-Aware Actions
 
-Task menus and quick actions should derive from implant capabilities instead of a hard-coded universal list.
+Task menus, quick actions, and the agent command set should derive from implant capabilities instead of a hard-coded universal list.
 
-That keeps the TUI aligned with the teamserver’s implant-family extensibility goals.
+### 4. Keep The Teamserver Command Pane
 
-### 4. Keep The Command Pane
-
-Do not remove the command interpreter just because the TUI exists.
+Do not remove the teamserver interpreter just because the TUI exists.
 
 It remains useful for:
 
@@ -514,21 +575,16 @@ It remains useful for:
 - debugging
 - newly added features before dedicated widgets exist
 
-### 5. Design For More Screens
+### 5. Avoid Hidden Retargeting
 
-Likely future screens:
+If agent context silently follows the highlighted row, the operator can task the wrong implant.
 
-- task history screen
-- payload browser
-- implant details full-screen view
-- audit/log view
-- grouped implants or tags view
+Mitigation:
 
-The first TUI version should keep those as future tabs or routes rather than trying to fit everything into one screen.
+- bind agent context to an explicit client ID
+- show that ID in the header and command pane title
 
 ## Suggested First Milestone
-
-The first TUI milestone should be intentionally narrow.
 
 Implement:
 
@@ -536,17 +592,17 @@ Implement:
 - implant table
 - implant details pane
 - activity pane
-- command input pane
-- active implant resolution in commands
+- explicit teamserver and agent command contexts
+- active implant resolution in teamserver commands
+- agent binding to one implant
+- capability-gated `whoami` in agent mode
 - key hints/help overlay
-
-That alone removes the biggest workflow pain.
 
 Do not try to add:
 
-- multi-screen navigation
+- multiple full-screen routes
 - popup forms for every task kind
-- extensive log viewers
+- a full log browser
 
 until the basic operator loop feels good.
 
@@ -554,11 +610,11 @@ until the basic operator loop feels good.
 
 After the first milestone works:
 
-- add quick task actions for common workflows
+- add more capability-aware agent commands
 - add command completion
-- add result preview improvements
+- improve result preview
 - add filters and sorts
-- add capability-aware action availability
+- add richer disabled-command explanations
 
 ## Risks
 
@@ -596,13 +652,26 @@ Mitigation:
 
 - route actions through shared services and command dispatch
 
+### 5. Context Confusion
+
+If the operator cannot tell whether they are typing to the teamserver or to an implant, the UI will feel unsafe.
+
+Mitigation:
+
+- use different pane titles
+- use different prompt labels
+- use different pane heights
+- show clear context indicators in the header
+
 ## Acceptance Criteria
 
-The first TUI phase is successful when:
+The first phase is successful when:
 
-- the operator can navigate active implants without copying UUIDs
-- the selected implant’s key host information is visible at a glance
-- the operator can queue a task against the selected implant without manually pasting the UUID
+- the operator can navigate implants without copying UUIDs
+- the selected implant's key host information is visible at a glance
+- selecting an implant binds a larger agent command workspace to that implant
+- only implant-supported agent commands are shown and accepted
+- `whoami` is available only for implants that support the current task path
 - the operator can review recent task results without leaving the main screen
-- the command interpreter remains available for advanced operations
-- the UI structure is modular enough to add new panes and actions without centralizing everything in one file
+- the operator can switch back to teamserver commands without losing situational awareness
+- the UI remains modular enough to add new panes and commands without centralizing everything in one file

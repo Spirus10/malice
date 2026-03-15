@@ -12,6 +12,8 @@ chrono = "0.4.22"
 hyper = { version = "1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7.12"
+crossterm = "0.28.1"
+ratatui = "0.29.0"
 
 http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["full"] }

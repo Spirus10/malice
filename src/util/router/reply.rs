@@ -14,7 +14,12 @@ pub struct PacketReply {
 }
 
 impl PacketReply {
-    pub fn packet<T: Serialize>(status: StatusCode, opcode: PacketOpcode, clientid: &str, payload: &T) -> Self {
+    pub fn packet<T: Serialize>(
+        status: StatusCode,
+        opcode: PacketOpcode,
+        clientid: &str,
+        payload: &T,
+    ) -> Self {
         match Packet::build(opcode, clientid, payload) {
             Ok(body) => Self { status, body },
             Err(err) => Self::text(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()),
@@ -31,9 +36,10 @@ impl PacketReply {
     pub fn into_http_response(self) -> Response<Full<Bytes>> {
         let mut response = Response::new(Full::new(Bytes::from(self.body)));
         *response.status_mut() = self.status;
-        response
-            .headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
         response
     }
 }
