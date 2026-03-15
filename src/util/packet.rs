@@ -1,20 +1,9 @@
 use std::{
-    collections::HashMap, convert::Infallible, net::{Incoming, SocketAddr}, 
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    clone::Clone,
-    io::{
-        Write,
-        Result,
-    },
+    io::{Error, ErrorKind, Result},
+    net::SocketAddr,
 };
 
-use serde::{Serialize, Deserialize};
-use serde_json::{Value, json};
-
-use uuid::Uuid;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BasePacket {
@@ -22,117 +11,111 @@ pub struct BasePacket {
     data: String,
 }
 
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Packet {
     opcode: u8,
-    peer_addr: SocketAddr,
     clientid: String,
     data: String,
-    data_length: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PacketOpcode {
-    REGISTER,
-    FETCH_TASK,
-    TASK_RESULT,
-    UNKNOWN,
+    Register,
+    FetchTask,
+    TaskResult,
+    Heartbeat,
+    Unknown,
 }
 
 impl PacketOpcode {
     pub fn to_u8(&self) -> u8 {
         match self {
-            PacketOpcode::REGISTER => 0x00,
-            PacketOpcode::FETCH_TASK => 0x01,
-            PacketOpcode::TASK_RESULT => 0x02,
-            PacketOpcode::UNKNOWN => 0xff,
+            PacketOpcode::Register => 0x00,
+            PacketOpcode::FetchTask => 0x01,
+            PacketOpcode::TaskResult => 0x02,
+            PacketOpcode::Heartbeat => 0x03,
+            PacketOpcode::Unknown => 0xff,
         }
     }
 
     pub fn from_u8(v: u8) -> Self {
         match v {
-            0x00 => PacketOpcode::REGISTER,
-            0x01 => PacketOpcode::FETCH_TASK,
-            0x02 => PacketOpcode::TASK_RESULT,
-            _ => PacketOpcode::UNKNOWN,
+            0x00 => PacketOpcode::Register,
+            0x01 => PacketOpcode::FetchTask,
+            0x02 => PacketOpcode::TaskResult,
+            0x03 => PacketOpcode::Heartbeat,
+            _ => PacketOpcode::Unknown,
         }
     }
 }
 
 impl Packet {
-    pub fn new(peer_addr: SocketAddr, buf: &[u8]) -> Result<Self> {
-
-
-        let test_packet = BasePacket { 
-            clientid: "513a666c-3349-40dd-9462-95c4449b0d0d".to_string(),
-            data: "junk data".to_string()
-        };
-        println!("{:#?}", serde_json::to_string_pretty(&test_packet));
-
+    pub fn new(_peer_addr: SocketAddr, buf: &[u8]) -> Result<Self> {
+        if buf.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidData, "Packet buffer is empty"));
+        }
 
         let opcode = buf[0];
+        let base_str = String::from_utf8(buf[1..].to_vec())
+            .map_err(|_| Error::new(ErrorKind::InvalidData, "Error parsing base packet data"))?;
+        let base: BasePacket = serde_json::from_str(&base_str)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
 
-        println!("opcode: {}", opcode);
-
-        let base_str = match String::from_utf8(buf[1..].to_vec()) {
-            Ok(p) => p,
-            Err(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Error parsing base packet data",
-                ))
-            }
-        };
-
-        println!("{:#?}", base_str);
-        let base: BasePacket = serde_json::from_str(&base_str)?;
-
-        Ok(Self { 
-            opcode, 
-            peer_addr, 
-            clientid: base.clientid, 
-            data: base.data, 
-            data_length: buf.len(),
-         })
+        Ok(Self {
+            opcode,
+            clientid: base.clientid,
+            data: base.data,
+        })
     }
 
-    pub fn build<T: Serialize>(opcode: u8, clientid: &String, data: T)  -> Result<Vec<u8>> {
-        let mut ret = vec![];
-        ret.push(opcode);
-
-        let data = serde_json::to_string(&data)?;
+    pub fn build<T: Serialize>(opcode: PacketOpcode, clientid: &str, data: &T) -> Result<Vec<u8>> {
+        let mut ret = vec![opcode.to_u8()];
+        let data = serde_json::to_string(data)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
 
         let base = BasePacket {
-            clientid: clientid.clone(),
+            clientid: clientid.to_string(),
             data,
         };
 
-        let data = serde_json::to_string(&base)?;
-        ret.append(&mut data.as_bytes().to_vec());
+        let data = serde_json::to_string(&base)
+            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
+        ret.extend_from_slice(data.as_bytes());
 
         Ok(ret)
     }
 
-    pub fn opcode(&self) -> u8 {
-        self.opcode
+    pub fn parse_data<T: DeserializeOwned>(&self) -> Result<T> {
+        serde_json::from_str(&self.data).map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
     }
 
-    pub fn peer_addr(&self) -> SocketAddr {
-        self.peer_addr
+    pub fn opcode_kind(&self) -> PacketOpcode {
+        PacketOpcode::from_u8(self.opcode)
     }
-
-    pub fn clientid(&self) -> String {
-        self.clientid.clone()
-    }
-}
-
-pub fn packet_cb(p: Packet) {
-    match PacketOpcode::from_u8(p.opcode()) {
-        PacketOpcode::REGISTER => todo!(),
-        PacketOpcode::FETCH_TASK => println!("cb triggered for fetch task packet"),
-        PacketOpcode::TASK_RESULT => todo!(),
-        PacketOpcode::UNKNOWN => println!("cb triggered for packet unknown"),
-
+    pub fn clientid(&self) -> &str {
+        &self.clientid
     }
 }
-// let packet = r#"{"clientid": "513a666c-3349-40dd-9462-95c4449b0d0d","data": "junk data"}"#;
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use serde_json::json;
+
+    use super::{Packet, PacketOpcode};
+
+    #[test]
+    fn packet_round_trip_preserves_opcode_and_inner_json() {
+        let clientid = "513a666c-3349-40dd-9462-95c4449b0d0d";
+        let payload = json!({ "want": 1 });
+        let bytes = Packet::build(PacketOpcode::FetchTask, clientid, &payload).unwrap();
+
+        let packet = Packet::new((IpAddr::V4(Ipv4Addr::LOCALHOST), 42069).into(), &bytes).unwrap();
+        let parsed_payload: serde_json::Value = packet.parse_data().unwrap();
+
+        assert_eq!(packet.opcode_kind(), PacketOpcode::FetchTask);
+        assert_eq!(packet.clientid(), clientid);
+        assert_eq!(parsed_payload, payload);
+    }
+}
