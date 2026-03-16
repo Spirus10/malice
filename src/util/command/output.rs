@@ -1,3 +1,5 @@
+//! Human-readable formatting helpers for command and widget output.
+
 use std::time::SystemTime;
 
 use chrono::{DateTime, Local};

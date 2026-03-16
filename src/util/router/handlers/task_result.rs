@@ -11,13 +11,18 @@ use crate::util::{
     tasks::{TaskResultPayload, TaskStatus},
 };
 
+/// Handles a task result packet and records the completed task outcome.
+///
+/// @param context Shared application state used to store task results.
+/// @param packet Parsed packet envelope containing the task result payload.
+/// @return Future that resolves to the packet reply sent back to the implant.
 pub fn handle(
     context: Arc<ServerContext>,
     packet: Packet,
 ) -> Pin<Box<dyn Future<Output = PacketReply> + Send>> {
     Box::pin(async move {
         match packet.parse_data::<TaskResultPayload>() {
-            Ok(payload) => match context.tasks().record_result(payload).await {
+            Ok(payload) => match context.record_task_result(payload).await {
                 Ok(task) => {
                     context
                         .implants()

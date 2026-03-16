@@ -1,3 +1,5 @@
+//! Hyper-based HTTP packet ingress used by the implant runtime.
+
 use std::{
     convert::Infallible,
     net::SocketAddr,
@@ -20,6 +22,8 @@ use tokio::{
 
 use super::{app::ServerContext, packet::Packet};
 
+const REGISTER_HEADER_NAME: &str = "x-malice-register";
+
 #[derive(Clone)]
 pub struct HttpServer {
     local_addr: SocketAddr,
@@ -29,6 +33,10 @@ pub struct HttpServer {
 }
 
 impl HttpServer {
+    /// Creates an HTTP packet server wrapper around the shared server context.
+    ///
+    /// @param context Shared application state used by request handlers.
+    /// @return HTTP server wrapper bound to the default localhost address.
     pub fn new(context: Arc<ServerContext>) -> Self {
         Self {
             local_addr: SocketAddr::from(([127, 0, 0, 1], 42069)),
@@ -38,6 +46,12 @@ impl HttpServer {
         }
     }
 
+    /// Processes one inbound HTTP request and routes valid packet bodies.
+    ///
+    /// @param context Shared application state used to route and fulfill packets.
+    /// @param req Incoming HTTP request from an implant.
+    /// @param peer_addr Remote socket address associated with the request.
+    /// @return HTTP response containing either a packet reply or a request error.
     pub async fn handle_request(
         context: Arc<ServerContext>,
         req: Request<IncomingBody>,
@@ -49,7 +63,9 @@ impl HttpServer {
             return Ok(response);
         }
 
-        let body = match req.collect().await {
+        let (parts, body) = req.into_parts();
+
+        let body = match body.collect().await {
             Ok(body) => body.to_bytes(),
             Err(err) => {
                 let mut response = Response::new(Full::new(Bytes::from(err.to_string())));
@@ -67,9 +83,25 @@ impl HttpServer {
             }
         };
 
+        let request_context = context.packet_request_context(
+            parts
+                .headers
+                .get(REGISTER_HEADER_NAME)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+        );
+        if let Err(err) = context.admission().validate(&request_context, &packet) {
+            let mut response = Response::new(Full::new(Bytes::from(err.to_string())));
+            *response.status_mut() = StatusCode::FORBIDDEN;
+            return Ok(response);
+        }
+
         Ok(context.router().route(packet).await.into_http_response())
     }
 
+    /// Starts accepting implant traffic on the configured address.
+    ///
+    /// @return Result describing whether the listener task started successfully.
     pub async fn start(
         &mut self,
     ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -115,6 +147,9 @@ impl HttpServer {
         Ok(())
     }
 
+    /// Stops the listener task if it is currently running.
+    ///
+    /// @return None.
     pub async fn close(&mut self) {
         self.closed.store(true, Ordering::Relaxed);
 

@@ -1,3 +1,5 @@
+//! Renders the implant list and current selection.
+
 use ratatui::{
     layout::Constraint,
     style::{Color, Modifier, Style},

@@ -1,6 +1,9 @@
+//! Mutable UI state, including selection, overlays, and command buffers.
+
 use crate::util::{
     activity::{ActivityEvent, ActivitySeverity},
-    implants::{ImplantCapability, ImplantRecord},
+    implants::{ImplantRecord, TaskingMetadata},
+    integrations::UiActionDefinition,
     tasks::TaskRecord,
 };
 
@@ -52,6 +55,8 @@ pub struct UiData {
     pub latest_task: Option<TaskRecord>,
     pub server_running: bool,
     pub server_addr: String,
+    pub tasking_metadata: TaskingMetadata,
+    pub task_menu_actions: Vec<UiActionDefinition>,
 }
 
 #[derive(Debug, Clone)]
@@ -220,16 +225,8 @@ impl UiState {
         }
     }
 
-    pub fn supported_agent_commands(&self) -> Vec<&'static str> {
-        let Some(record) = self.bound_agent() else {
-            return Vec::new();
-        };
-
-        if record.supports(ImplantCapability::ExecuteCoff) {
-            vec!["whoami"]
-        } else {
-            Vec::new()
-        }
+    pub fn supported_agent_commands(&self) -> Vec<String> {
+        self.data.tasking_metadata.command_names.clone()
     }
 
     pub fn set_status(&mut self, kind: StatusKind, message: impl Into<String>) {

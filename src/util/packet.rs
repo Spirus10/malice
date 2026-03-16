@@ -50,6 +50,11 @@ impl PacketOpcode {
 }
 
 impl Packet {
+    /// Parses the opcode-prefixed packet bytes received over HTTP.
+    ///
+    /// @param _peer_addr Remote socket address associated with the packet.
+    /// @param buf Raw opcode-prefixed packet bytes.
+    /// @return Decoded packet envelope or an I/O error if parsing fails.
     pub fn new(_peer_addr: SocketAddr, buf: &[u8]) -> Result<Self> {
         if buf.is_empty() {
             return Err(Error::new(ErrorKind::InvalidData, "Packet buffer is empty"));
@@ -68,6 +73,12 @@ impl Packet {
         })
     }
 
+    /// Builds the opcode-prefixed wire format used by implants and the teamserver.
+    ///
+    /// @param opcode Packet opcode to encode in the first byte.
+    /// @param clientid Implant identifier stored in the outer envelope.
+    /// @param data Serializable payload stored in the outer envelope.
+    /// @return Encoded packet bytes or an I/O error if serialization fails.
     pub fn build<T: Serialize>(opcode: PacketOpcode, clientid: &str, data: &T) -> Result<Vec<u8>> {
         let mut ret = vec![opcode.to_u8()];
         let data = serde_json::to_string(data)
@@ -85,6 +96,9 @@ impl Packet {
         Ok(ret)
     }
 
+    /// Deserializes the inner packet payload into the requested type.
+    ///
+    /// @return Parsed payload or an I/O error if JSON deserialization fails.
     pub fn parse_data<T: DeserializeOwned>(&self) -> Result<T> {
         serde_json::from_str(&self.data)
             .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))

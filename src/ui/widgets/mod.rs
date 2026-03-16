@@ -1,3 +1,5 @@
+//! Individual dashboard widgets rendered by the TUI.
+
 pub mod activity;
 pub mod command;
 pub mod details;

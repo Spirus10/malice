@@ -1,3 +1,5 @@
+//! Maps crossterm key events onto the UI action model.
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{actions::UiAction, state::Mode};

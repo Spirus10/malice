@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -47,11 +48,18 @@ pub enum TaskStatus {
 }
 
 #[derive(Debug, Clone)]
+pub enum TaskResultHandling {
+    Text,
+    Download { save_path: PathBuf },
+}
+
+#[derive(Debug, Clone)]
 pub struct ExecuteCoffTask {
     pub object_name: String,
     pub object_bytes: Vec<u8>,
     pub entrypoint: String,
     pub args: Vec<u8>,
+    pub result_handling: TaskResultHandling,
 }
 
 #[derive(Debug, Clone)]
@@ -66,11 +74,28 @@ impl TaskSpec {
         entrypoint: String,
         args: Vec<u8>,
     ) -> Self {
+        Self::execute_coff_with_handling(
+            object_name,
+            object_bytes,
+            entrypoint,
+            args,
+            TaskResultHandling::Text,
+        )
+    }
+
+    pub fn execute_coff_with_handling(
+        object_name: String,
+        object_bytes: Vec<u8>,
+        entrypoint: String,
+        args: Vec<u8>,
+        result_handling: TaskResultHandling,
+    ) -> Self {
         Self::ExecuteCoff(ExecuteCoffTask {
             object_name,
             object_bytes,
             entrypoint,
             args,
+            result_handling,
         })
     }
 
@@ -82,7 +107,7 @@ impl TaskSpec {
 
     pub fn required_capability(&self) -> ImplantCapability {
         match self {
-            Self::ExecuteCoff(_) => ImplantCapability::ExecuteCoff,
+            Self::ExecuteCoff(_) => ImplantCapability::from_key("execute_coff"),
         }
     }
 }
@@ -96,6 +121,7 @@ pub enum TaskResultData {
 pub struct TaskRecord {
     pub task_id: Uuid,
     pub clientid: Uuid,
+    pub integration_id: String,
     pub spec: TaskSpec,
     pub queued_at: SystemTime,
     pub leased_at: Option<SystemTime>,

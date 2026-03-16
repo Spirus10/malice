@@ -1,3 +1,5 @@
+//! Shows details about the selected implant and its latest task.
+
 use std::time::SystemTime;
 
 use ratatui::{

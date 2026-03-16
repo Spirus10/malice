@@ -1,3 +1,5 @@
+//! In-memory activity log used by the TUI and HTTP handlers.
+
 use std::{collections::VecDeque, sync::Arc, time::SystemTime};
 
 use tokio::sync::Mutex;
@@ -26,6 +28,7 @@ pub struct ActivityLog {
 }
 
 impl ActivityLog {
+    /// Creates an activity log that retains up to `capacity` events.
     pub fn new(capacity: usize) -> Self {
         Self {
             events: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),

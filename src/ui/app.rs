@@ -1,3 +1,5 @@
+//! Owns the ratatui event loop, terminal lifecycle, and top-level drawing.
+
 use std::{
     io::{self, Result},
     time::{Duration, Instant},
@@ -18,6 +20,9 @@ use super::{
     widgets,
 };
 
+/// Runs the terminal UI event loop until the operator exits.
+///
+/// @return Terminal I/O result for the full UI session.
 pub async fn run() -> Result<()> {
     let mut terminal = setup_terminal()?;
     let controller = TuiController::new().await;

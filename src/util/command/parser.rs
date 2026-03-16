@@ -1,3 +1,5 @@
+//! Parses operator command lines into structured command enums.
+
 #[derive(Debug, Clone)]
 pub enum ParsedCommand {
     Server(ServerCommand),
@@ -8,7 +10,7 @@ pub enum ParsedCommand {
 
 #[derive(Debug, Clone)]
 pub enum ServerCommand {
-    TcpServer { action: String },
+    HttpServer { action: String },
 }
 
 #[derive(Debug, Clone)]
@@ -29,17 +31,53 @@ pub enum TaskCommand {
     },
 }
 
-pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
-    let mut parts = input.split_whitespace();
-    let command = parts.next().unwrap_or("");
-    let args: Vec<String> = parts.map(str::to_string).collect();
+pub fn tokenize_command_line(input: &str) -> Result<Vec<String>, String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars();
+    let mut quote: Option<char> = None;
 
-    match command {
-        "tcpserver" => match args.as_slice() {
-            [action] => Ok(ParsedCommand::Server(ServerCommand::TcpServer {
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(active_quote) if ch == active_quote => quote = None,
+            Some(_) => current.push(ch),
+            None if ch == '"' || ch == '\'' => quote = Some(ch),
+            None if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            None => current.push(ch),
+        }
+    }
+
+    if quote.is_some() {
+        return Err("Unterminated quoted string".to_string());
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    Ok(tokens)
+}
+
+/// Parses one operator command line into the internal command model.
+///
+/// @param input Raw command line entered by the operator.
+/// @return Parsed command on success, or a usage/error message on failure.
+pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
+    let tokens = tokenize_command_line(input)?;
+    let mut parts = tokens.into_iter();
+    let command = parts.next().unwrap_or_default();
+    let args: Vec<String> = parts.collect();
+
+    match command.as_str() {
+        "httpserver" => match args.as_slice() {
+            [action] => Ok(ParsedCommand::Server(ServerCommand::HttpServer {
                 action: action.clone(),
             })),
-            _ => Err("Usage: tcpserver start|stop".to_string()),
+            _ => Err("Usage: httpserver start|stop".to_string()),
         },
         "implants" => match args.as_slice() {
             [subcommand] if subcommand == "list" => {
@@ -72,5 +110,47 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
         },
         "exit" => Ok(ParsedCommand::Exit),
         _ => Err(format!("Unknown command: {command}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_command, ParsedCommand, TaskCommand};
+
+    #[test]
+    fn parses_quoted_task_arguments() {
+        let parsed =
+            parse_command(r#"task queue selected execute "cmd.exe /c echo hello world""#).unwrap();
+
+        match parsed {
+            ParsedCommand::Tasks(TaskCommand::Queue {
+                clientid,
+                task_kind,
+                args,
+            }) => {
+                assert_eq!(clientid, "selected");
+                assert_eq!(task_kind, "execute");
+                assert_eq!(args, vec!["cmd.exe /c echo hello world"]);
+            }
+            _ => panic!("unexpected command shape"),
+        }
+    }
+
+    #[test]
+    fn rejects_unterminated_quotes() {
+        let error = parse_command(r#"task queue selected upload "C:\Temp\a.txt"#).unwrap_err();
+        assert_eq!(error, "Unterminated quoted string");
+    }
+
+    #[test]
+    fn preserves_windows_paths_inside_quotes() {
+        let parsed = parse_command(r#"task queue selected ls "C:\Users\wammu\Documents""#).unwrap();
+
+        match parsed {
+            ParsedCommand::Tasks(TaskCommand::Queue { args, .. }) => {
+                assert_eq!(args, vec![r#"C:\Users\wammu\Documents"#]);
+            }
+            _ => panic!("unexpected command shape"),
+        }
     }
 }

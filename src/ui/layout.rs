@@ -1,3 +1,5 @@
+//! Splits the screen into the stable regions used by the dashboard.
+
 use ratatui::layout::{Constraint, Layout, Rect};
 
 use super::state::CommandContextMode;

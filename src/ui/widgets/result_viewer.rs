@@ -1,3 +1,5 @@
+//! Renders the modal viewer for the latest task result text.
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::Line,

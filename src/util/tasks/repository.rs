@@ -23,10 +23,16 @@ impl TaskRepository {
         }
     }
 
-    pub async fn insert_queued(&self, clientid: Uuid, spec: TaskSpec) -> TaskRecord {
+    pub async fn insert_queued(
+        &self,
+        clientid: Uuid,
+        integration_id: String,
+        spec: TaskSpec,
+    ) -> TaskRecord {
         let task = TaskRecord {
             task_id: Uuid::new_v4(),
             clientid,
+            integration_id,
             spec,
             queued_at: SystemTime::now(),
             leased_at: None,

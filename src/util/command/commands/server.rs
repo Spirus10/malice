@@ -1,3 +1,5 @@
+//! Teamserver lifecycle commands exposed through the operator console.
+
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::util::command::{
@@ -20,10 +22,10 @@ pub fn execute(
         };
 
         match command {
-            ServerCommand::TcpServer { action } => match action.as_str() {
+            ServerCommand::HttpServer { action } => match action.as_str() {
                 "start" => context.start_server().await,
                 "stop" => Ok(context.stop_server().await),
-                _ => Err(CommandError::new("Usage: tcpserver start|stop")),
+                _ => Err(CommandError::new("Usage: httpserver start|stop")),
             },
         }
     })

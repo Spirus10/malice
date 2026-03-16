@@ -1,3 +1,5 @@
+//! Task queueing and result lookup commands.
+
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::util::command::{

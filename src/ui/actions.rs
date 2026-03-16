@@ -1,3 +1,5 @@
+//! High-level actions emitted by the keyboard input layer.
+
 #[derive(Debug, Clone)]
 pub enum UiAction {
     Tick,

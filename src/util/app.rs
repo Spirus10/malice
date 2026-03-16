@@ -1,13 +1,19 @@
+//! Central server context shared by command handlers, HTTP routes, and the UI.
+
 use std::{io::Result as IoResult, sync::Arc};
 
 use uuid::Uuid;
 
 use super::{
+    admission::{AdmissionPolicy, PacketRequestContext, RegisterHeaderPolicy},
     activity::{ActivityEvent, ActivityLog, ActivitySeverity},
     implants::{ImplantRecord, ImplantRegistry},
-    payloads::{PayloadArtifact, PayloadRepository},
+    integrations::{
+        ImplantIntegrationRegistry, TaskDefinition, UiActionDefinition, DEFAULT_RESULT_ACTION_ID,
+    },
+    payloads::PayloadRepository,
     router::PacketRouter,
-    tasks::{TaskRecord, TaskService, TaskSpec},
+    tasks::{FetchTaskResponse, TaskRecord, TaskResultPayload, TaskService},
 };
 
 #[derive(Clone)]
@@ -15,18 +21,25 @@ pub struct ServerContext {
     implants: ImplantRegistry,
     tasks: TaskService,
     payloads: PayloadRepository,
+    integrations: ImplantIntegrationRegistry,
     router: PacketRouter,
     activity: ActivityLog,
+    admission: Arc<dyn AdmissionPolicy>,
 }
 
 impl ServerContext {
+    /// Creates a reference-counted server context and wires cyclic router access.
+    ///
+    /// @return Shared server context containing the registries, router, and task services.
     pub fn new() -> Arc<Self> {
         Arc::new_cyclic(|weak| Self {
             implants: ImplantRegistry::new(),
             tasks: TaskService::new(),
             payloads: PayloadRepository::new(),
+            integrations: ImplantIntegrationRegistry::new(),
             router: PacketRouter::new(weak.clone()),
             activity: ActivityLog::new(256),
+            admission: Arc::new(RegisterHeaderPolicy),
         })
     }
 
@@ -38,10 +51,21 @@ impl ServerContext {
         &self.implants
     }
 
-    pub fn tasks(&self) -> &TaskService {
-        &self.tasks
+    pub fn admission(&self) -> &dyn AdmissionPolicy {
+        self.admission.as_ref()
     }
 
+    pub fn packet_request_context(&self, registration_header: Option<String>) -> PacketRequestContext {
+        PacketRequestContext { registration_header }
+    }
+
+    /// Records one activity event for later display in the UI.
+    ///
+    /// @param severity Severity level to record.
+    /// @param message Human-readable activity description.
+    /// @param clientid Optional implant identifier associated with the event.
+    /// @param task_id Optional task identifier associated with the event.
+    /// @return None.
     pub async fn record_activity(
         &self,
         severity: ActivitySeverity,
@@ -54,10 +78,19 @@ impl ServerContext {
             .await;
     }
 
+    /// Returns the most recent activity events across all implants.
+    ///
+    /// @param limit Maximum number of events to return.
+    /// @return Activity events ordered from newest to oldest.
     pub async fn recent_activity(&self, limit: usize) -> Vec<ActivityEvent> {
         self.activity.recent(limit).await
     }
 
+    /// Returns the most recent activity events for a specific implant.
+    ///
+    /// @param clientid Implant identifier used to filter events.
+    /// @param limit Maximum number of events to return.
+    /// @return Activity events for the selected implant ordered from newest to oldest.
     pub async fn recent_activity_for_implant(
         &self,
         clientid: &Uuid,
@@ -74,6 +107,12 @@ impl ServerContext {
         self.implants.get(clientid).await
     }
 
+    /// Queues a named task after validating the target implant and arguments.
+    ///
+    /// @param clientid Implant identifier that should receive the task.
+    /// @param task_kind User-facing task name such as `execute_coff`.
+    /// @param args Additional task arguments supplied by the operator.
+    /// @return Queued task record on success, or an I/O error if validation fails.
     pub async fn queue_named_task(
         &self,
         clientid: Uuid,
@@ -84,18 +123,25 @@ impl ServerContext {
             self.implants.get(&clientid).await.ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "Unknown implant")
             })?;
-
-        let spec = match task_kind {
-            "execute_coff" | "coff" => self.build_execute_coff_task(args)?,
-            _ => {
-                return Err(std::io::Error::new(
+        let integration = self
+            .integrations
+            .by_implant_type(&implant.identity.implant_type)?;
+        let spec = integration
+            .build_task(&implant, task_kind, args, &self.payloads)?
+            .ok_or_else(|| {
+                std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("Unknown task kind: {task_kind}"),
-                ))
-            }
-        };
+                    format!(
+                        "Unknown task kind '{task_kind}' for implant family {}",
+                        implant.identity.family.key()
+                    ),
+                )
+            })?;
 
-        let task = self.tasks.queue_task_for_implant(&implant, spec).await?;
+        let task = self
+            .tasks
+            .queue_task_for_implant(&implant, integration.id(), spec)
+            .await?;
         self.record_activity(
             ActivitySeverity::Info,
             format!("queued {} for {}", task.spec.task_type(), task.clientid),
@@ -106,31 +152,106 @@ impl ServerContext {
         Ok(task)
     }
 
+    /// Returns the persisted record for one task, if it exists.
+    ///
+    /// @param task_id Task identifier to look up.
+    /// @return Task record when found, otherwise `None`.
     pub async fn task_result(&self, task_id: &Uuid) -> Option<TaskRecord> {
         self.tasks.get(task_id).await
     }
 
+    /// Returns the most recent tasks across all implants.
+    ///
+    /// @param limit Maximum number of task records to return.
+    /// @return Task records ordered from newest to oldest.
     pub async fn recent_tasks(&self, limit: usize) -> Vec<TaskRecord> {
         self.tasks.recent(limit).await
     }
 
+    /// Returns the most recent tasks for a specific implant.
+    ///
+    /// @param clientid Implant identifier used to filter task records.
+    /// @param limit Maximum number of task records to return.
+    /// @return Task records for the selected implant ordered from newest to oldest.
     pub async fn recent_tasks_for_implant(&self, clientid: &Uuid, limit: usize) -> Vec<TaskRecord> {
         self.tasks.recent_for_implant(clientid, limit).await
     }
 
-    fn build_execute_coff_task(&self, args: &[String]) -> IoResult<TaskSpec> {
-        let logical_name = args.first().map(String::as_str).unwrap_or("whoami");
-        let artifact: PayloadArtifact = self.payloads.resolve(logical_name)?;
+    pub async fn register_implant(
+        &self,
+        requested_clientid: Option<Uuid>,
+        payload: super::implants::RegisterPayload,
+    ) -> IoResult<ImplantRecord> {
+        let integration = self.integrations.by_implant_type(&payload.implant_type)?;
+        integration.validate_registration(&payload)?;
+        self.implants
+            .register(
+                requested_clientid,
+                payload,
+                integration.family(),
+                integration.capabilities().to_vec(),
+            )
+            .await
+    }
 
-        Ok(TaskSpec::execute_coff(
-            artifact.file_name,
-            artifact.bytes,
-            args.get(1).cloned().unwrap_or_else(|| "main".to_string()),
-            if args.len() > 2 {
-                args[2..].join(" ").into_bytes()
-            } else {
-                Vec::new()
-            },
-        ))
+    pub async fn fetch_tasks_for_implant(
+        &self,
+        clientid: Uuid,
+        want: usize,
+    ) -> IoResult<FetchTaskResponse> {
+        let tasks = self.tasks.lease_tasks(clientid, want).await;
+        let mut envelopes = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            let integration = self.integrations.by_id(&task.integration_id)?;
+            envelopes.push(integration.serialize_task(&task)?);
+        }
+
+        Ok(FetchTaskResponse { tasks: envelopes })
+    }
+
+    pub async fn record_task_result(&self, payload: TaskResultPayload) -> IoResult<TaskRecord> {
+        let task = self
+            .tasks
+            .get(&payload.task_id)
+            .await
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "Unknown task id")
+            })?;
+        let integration = self.integrations.by_id(&task.integration_id)?;
+        let (task_id, status, result) = integration.decode_result(&task, payload)?;
+        self.tasks.complete_result(task_id, status, result).await
+    }
+
+    pub fn tasking_metadata(&self, implant: &ImplantRecord) -> IoResult<super::implants::TaskingMetadata> {
+        let integration = self
+            .integrations
+            .by_implant_type(&implant.identity.implant_type)?;
+        let definitions: &[TaskDefinition] = integration.task_definitions();
+        Ok(super::implants::TaskingMetadata {
+            command_names: definitions
+                .iter()
+                .map(|definition| definition.kind.to_string())
+                .collect(),
+            command_help: definitions
+                .iter()
+                .map(|definition| definition.usage.to_string())
+                .collect(),
+        })
+    }
+
+    pub fn ui_actions_for_implant(&self, implant: &ImplantRecord) -> IoResult<Vec<UiActionDefinition>> {
+        let integration = self
+            .integrations
+            .by_implant_type(&implant.identity.implant_type)?;
+        let mut actions = integration.ui_actions().to_vec();
+        actions.push(UiActionDefinition {
+            id: DEFAULT_RESULT_ACTION_ID.to_string(),
+            label: "view latest result".to_string(),
+            task_kind: None,
+            args_template: Vec::new(),
+            command_template: None,
+            queue_immediately: false,
+        });
+        Ok(actions)
     }
 }

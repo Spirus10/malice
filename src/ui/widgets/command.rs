@@ -1,3 +1,5 @@
+//! Renders the command/output pane for teamserver and agent contexts.
+
 use ratatui::{
     style::{Color, Style},
     text::Line,
@@ -35,7 +37,22 @@ fn render_teamserver(state: &UiState) -> (String, Vec<Line<'static>>) {
     let mut lines = vec![prompt];
     if state.teamserver_output.is_empty() {
         lines.push(Line::from(
-            "global commands: tcpserver, implants, task result",
+            "global commands: httpserver, implants, task queue, task result",
+        ));
+        let advertised = if state.data.tasking_metadata.command_names.is_empty() {
+            "tasks depend on the selected implant".to_string()
+        } else {
+            format!(
+                "tasks for selected implant: {}",
+                state.data.tasking_metadata.command_names.join(", ")
+            )
+        };
+        lines.push(Line::from(advertised));
+        lines.push(Line::from(
+            "examples: task queue selected pwd | task queue selected ls \"C:\\Users\\Public\\*\"",
+        ));
+        lines.push(Line::from(
+            "press `t` for task templates, `:` for raw teamserver commands",
         ));
     } else {
         lines.extend(

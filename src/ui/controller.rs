@@ -1,8 +1,11 @@
+//! Translates UI actions into state transitions and server-side operations.
+
 use std::io::{Error, ErrorKind, Result};
 
 use crate::util::{
-    command::CommandHandler,
-    implants::{ImplantCapability, ImplantRecord},
+    command::{tokenize_command_line, CommandHandler, ImplantCommand, ParsedCommand, TaskCommand},
+    implants::ImplantRecord,
+    integrations::DEFAULT_RESULT_ACTION_ID,
 };
 
 use super::{
@@ -15,12 +18,19 @@ pub struct TuiController {
 }
 
 impl TuiController {
+    /// Builds a controller with a fully initialized command handler.
+    ///
+    /// @return Controller instance ready to refresh state and handle actions.
     pub async fn new() -> Self {
         Self {
             handler: CommandHandler::new().await,
         }
     }
 
+    /// Refreshes the screen model from the current teamserver state.
+    ///
+    /// @param state Mutable UI state to repopulate from server-side data.
+    /// @return I/O result describing whether the refresh succeeded.
     pub async fn refresh(&self, state: &mut UiState) -> Result<()> {
         let context = self.handler.context();
         let server = context.server_context().await;
@@ -65,9 +75,27 @@ impl TuiController {
             state.data.latest_task = server.recent_tasks(1).await.into_iter().next();
         }
 
+        let metadata_record = state
+            .bound_agent()
+            .cloned()
+            .or_else(|| state.selected_implant().cloned());
+        if let Some(record) = metadata_record.as_ref() {
+            state.data.tasking_metadata = server.tasking_metadata(record).unwrap_or_default();
+            state.data.task_menu_actions =
+                server.ui_actions_for_implant(record).unwrap_or_default();
+        } else {
+            state.data.tasking_metadata = Default::default();
+            state.data.task_menu_actions.clear();
+        }
+
         Ok(())
     }
 
+    /// Applies one normalized UI action to the current state.
+    ///
+    /// @param action Normalized operator intent emitted by the input layer.
+    /// @param state Mutable UI state to update.
+    /// @return I/O result describing whether the action completed successfully.
     pub async fn handle_action(&self, action: UiAction, state: &mut UiState) -> Result<()> {
         match action {
             UiAction::Tick | UiAction::Refresh => self.refresh(state).await,
@@ -209,7 +237,9 @@ impl TuiController {
                 Ok(())
             }
             UiAction::TaskMenuNext => {
-                state.task_menu_index = (state.task_menu_index + 1).min(1);
+                state.task_menu_index =
+                    (state.task_menu_index + 1)
+                        .min(state.data.task_menu_actions.len().saturating_sub(1));
                 Ok(())
             }
             UiAction::TaskMenuPrevious => {
@@ -281,46 +311,59 @@ impl TuiController {
     }
 
     async fn confirm_task_menu(&self, state: &mut UiState) -> Result<()> {
-        match state.task_menu_index {
-            0 => self.queue_whoami(state).await,
-            1 => {
-                if let Some(task) = &state.data.latest_task {
-                    state.teamserver_input = format!("task result {}", task.task_id);
-                    state.enter_teamserver_context();
-                    state.set_status(StatusKind::Info, "latest task command inserted");
-                } else {
-                    state.mode = Mode::Browse;
-                    state.set_status(StatusKind::Error, "no recent task for selection");
-                }
-                Ok(())
+        let Some(action) = state.data.task_menu_actions.get(state.task_menu_index).cloned() else {
+            return Ok(());
+        };
+
+        if action.id == DEFAULT_RESULT_ACTION_ID {
+            if let Some(task) = &state.data.latest_task {
+                state.teamserver_input = format!("task result {}", task.task_id);
+                state.enter_teamserver_context();
+                state.set_status(StatusKind::Info, "latest task command inserted");
+            } else {
+                state.mode = Mode::Browse;
+                state.set_status(StatusKind::Error, "no recent task for selection");
             }
-            _ => Ok(()),
+            return Ok(());
         }
-    }
 
-    async fn queue_whoami(&self, state: &mut UiState) -> Result<()> {
-        let record = self.bound_agent_record(state)?;
-        self.ensure_execute_coff(record)?;
+        if action.queue_immediately {
+            let Some(task_kind) = action.task_kind else {
+                return Err(Error::new(ErrorKind::InvalidInput, "task action missing task kind"));
+            };
+            let record = self.bound_agent_record(state)?;
+            let task = self
+                .handler
+                .context()
+                .queue_task(
+                    record.identity.clientid,
+                    &task_kind,
+                    &action
+                        .args_template
+                        .iter()
+                        .map(|value| value.to_string())
+                        .collect::<Vec<_>>(),
+                )
+                .await
+                .map_err(|err| Error::other(err.to_string()))?;
 
-        let task = self
-            .handler
-            .context()
-            .queue_task(
-                record.identity.clientid,
-                "execute_coff",
-                &["whoami".to_string(), "main".to_string()],
-            )
-            .await
-            .map_err(|err| Error::other(err.to_string()))?;
-
-        state.agent_output = vec![
-            format!("queued whoami for {}", task.clientid),
-            format!("task_id {}", task.task_id),
-        ];
-        state.agent_input.clear();
-        state.mode = Mode::Browse;
-        state.set_status(StatusKind::Success, "queued whoami");
-        self.refresh(state).await
+            state.agent_output = vec![
+                format!("queued {} for {}", task_kind, task.clientid),
+                format!("task_id {}", task.task_id),
+            ];
+            state.agent_input.clear();
+            state.mode = Mode::Browse;
+            state.set_status(StatusKind::Success, format!("queued {task_kind}"));
+            self.refresh(state).await
+        } else if let Some(template) = action.command_template {
+            self.insert_task_template(state, &template);
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::InvalidInput,
+                "task action missing command template",
+            ))
+        }
     }
 
     async fn submit_teamserver_command(&self, state: &mut UiState) -> Result<()> {
@@ -330,9 +373,9 @@ impl TuiController {
             return Ok(());
         }
 
-        let resolved = self.resolve_aliases(&input, state)?;
-        let parsed = CommandHandler::parse_command(&resolved)
+        let parsed = CommandHandler::parse_command(&input)
             .map_err(|err| Error::new(ErrorKind::InvalidInput, err.to_string()))?;
+        let parsed = self.resolve_aliases(parsed, state)?;
         let output = self
             .handler
             .handle(parsed)
@@ -348,17 +391,21 @@ impl TuiController {
     }
 
     async fn submit_agent_command(&self, state: &mut UiState) -> Result<()> {
-        let input = state.agent_input.trim().to_ascii_lowercase();
+        let input = state.agent_input.trim().to_string();
         if input.is_empty() {
             state.mode = Mode::Browse;
             return Ok(());
         }
 
-        match input.as_str() {
-            "whoami" => {
-                state.push_agent_history(input);
-                self.queue_whoami(state).await
-            }
+        let tokens = tokenize_command_line(&input)
+            .map_err(|err| Error::new(ErrorKind::InvalidInput, err))?;
+        let Some((command, args)) = tokens.split_first() else {
+            state.mode = Mode::Browse;
+            return Ok(());
+        };
+        let command = command.to_ascii_lowercase();
+
+        match command.as_str() {
             "help" => {
                 state.agent_output = self.agent_help_lines(state);
                 state.push_agent_history(input);
@@ -373,6 +420,29 @@ impl TuiController {
                 state.enter_teamserver_context();
                 state.set_status(StatusKind::Info, "returned to teamserver command mode");
                 Ok(())
+            }
+            _ if state
+                .supported_agent_commands()
+                .iter()
+                .any(|candidate| candidate == &command) =>
+            {
+                let record = self.bound_agent_record(state)?;
+                let task = self
+                    .handler
+                    .context()
+                    .queue_task(record.identity.clientid, &command, args)
+                    .await
+                    .map_err(|err| Error::other(err.to_string()))?;
+
+                state.agent_output = vec![
+                    format!("queued {} for {}", command, task.clientid),
+                    format!("task_id {}", task.task_id),
+                ];
+                state.push_agent_history(input);
+                state.agent_input.clear();
+                state.mode = Mode::Browse;
+                state.set_status(StatusKind::Success, format!("queued {command}"));
+                self.refresh(state).await
             }
             _ => {
                 let supported = state.supported_agent_commands();
@@ -392,18 +462,24 @@ impl TuiController {
         }
     }
 
-    fn resolve_aliases(&self, input: &str, state: &UiState) -> Result<String> {
-        let mut parts: Vec<String> = input.split_whitespace().map(str::to_string).collect();
-        match parts.as_mut_slice() {
-            [command, subcommand, clientid, ..] if command == "task" && subcommand == "queue" => {
-                *clientid = self.resolve_target(clientid, state)?;
+    fn resolve_aliases(&self, command: ParsedCommand, state: &UiState) -> Result<ParsedCommand> {
+        match command {
+            ParsedCommand::Tasks(TaskCommand::Queue {
+                clientid,
+                task_kind,
+                args,
+            }) => Ok(ParsedCommand::Tasks(TaskCommand::Queue {
+                clientid: self.resolve_target(&clientid, state)?,
+                task_kind,
+                args,
+            })),
+            ParsedCommand::Implants(ImplantCommand::Info { clientid }) => {
+                Ok(ParsedCommand::Implants(ImplantCommand::Info {
+                    clientid: self.resolve_target(&clientid, state)?,
+                }))
             }
-            [command, subcommand, clientid] if command == "implants" && subcommand == "info" => {
-                *clientid = self.resolve_target(clientid, state)?;
-            }
-            _ => {}
+            other => Ok(other),
         }
-        Ok(parts.join(" "))
     }
 
     fn resolve_target(&self, token: &str, state: &UiState) -> Result<String> {
@@ -423,27 +499,30 @@ impl TuiController {
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "No bound implant selected"))
     }
 
-    fn ensure_execute_coff(&self, record: &ImplantRecord) -> Result<()> {
-        if record.supports(ImplantCapability::ExecuteCoff) {
-            Ok(())
-        } else {
-            Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Selected implant does not support whoami",
-            ))
-        }
-    }
-
     fn agent_help_lines(&self, state: &UiState) -> Vec<String> {
         let mut lines = vec!["supported agent commands:".to_string()];
-        let supported = state.supported_agent_commands();
+        if state.bound_agent().is_none() {
+            lines.push("none".to_string());
+            lines.push("help".to_string());
+            lines.push("back".to_string());
+            return lines;
+        }
+
+        let supported = state.data.tasking_metadata.command_help.clone();
         if supported.is_empty() {
             lines.push("none".to_string());
         } else {
-            lines.extend(supported.into_iter().map(str::to_string));
+            lines.extend(supported);
         }
+
         lines.push("help".to_string());
         lines.push("back".to_string());
         lines
+    }
+
+    fn insert_task_template(&self, state: &mut UiState, template: &str) {
+        state.teamserver_input = template.to_string();
+        state.enter_teamserver_context();
+        state.set_status(StatusKind::Info, "task template inserted");
     }
 }

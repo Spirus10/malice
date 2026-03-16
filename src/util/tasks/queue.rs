@@ -4,30 +4,32 @@ use uuid::Uuid;
 
 use crate::util::implants::ImplantRecord;
 
-use super::{
-    repository::TaskRepository,
-    results::decode_result,
-    serializer::TaskSerializer,
-    types::{FetchTaskResponse, TaskRecord, TaskResultPayload, TaskSpec},
-};
+use super::{repository::TaskRepository, types::TaskRecord, TaskSpec};
 
 #[derive(Clone)]
 pub struct TaskService {
     repository: TaskRepository,
-    serializer: TaskSerializer,
 }
 
 impl TaskService {
+    /// Creates an in-memory task service backed by the default repository.
+    ///
+    /// @return Task service ready to queue, lease, and complete tasks.
     pub fn new() -> Self {
         Self {
             repository: TaskRepository::new(),
-            serializer: TaskSerializer,
         }
     }
 
+    /// Queues a task for one implant after validating required capabilities.
+    ///
+    /// @param implant Implant record targeted by the task.
+    /// @param spec Concrete task specification to persist.
+    /// @return Queued task record or an I/O error if validation fails.
     pub async fn queue_task_for_implant(
         &self,
         implant: &ImplantRecord,
+        integration_id: &str,
         spec: TaskSpec,
     ) -> Result<TaskRecord> {
         let required = spec.required_capability();
@@ -44,22 +46,28 @@ impl TaskService {
 
         Ok(self
             .repository
-            .insert_queued(implant.identity.clientid, spec)
+            .insert_queued(
+                implant.identity.clientid,
+                integration_id.to_string(),
+                spec,
+            )
             .await)
     }
 
-    pub async fn fetch_tasks(&self, clientid: Uuid, want: usize) -> FetchTaskResponse {
-        let tasks = self.repository.lease_tasks(clientid, want).await;
-        FetchTaskResponse {
-            tasks: tasks
-                .iter()
-                .map(|task| self.serializer.serialize(task))
-                .collect(),
-        }
+    pub async fn lease_tasks(
+        &self,
+        clientid: Uuid,
+        want: usize,
+    ) -> Vec<TaskRecord> {
+        self.repository.lease_tasks(clientid, want).await
     }
 
-    pub async fn record_result(&self, payload: TaskResultPayload) -> Result<TaskRecord> {
-        let (task_id, status, result) = decode_result(payload)?;
+    pub async fn complete_result(
+        &self,
+        task_id: Uuid,
+        status: super::types::TaskStatus,
+        result: super::types::TaskResultData,
+    ) -> Result<TaskRecord> {
         self.repository
             .complete(task_id, status, result)
             .await
@@ -84,14 +92,14 @@ impl TaskService {
 #[cfg(test)]
 mod tests {
     use crate::util::implants::{
-        ImplantCapability, ImplantRecord, ImplantRegistry, RegisterPayload,
+        ImplantCapability, ImplantFamily, ImplantRecord, ImplantRegistry, RegisterPayload,
     };
-    use crate::util::tasks::TaskResultData;
 
     use super::*;
 
     async fn implant_with_capabilities(capabilities: Vec<ImplantCapability>) -> ImplantRecord {
-        let family = if capabilities.contains(&ImplantCapability::ExecuteCoff) {
+        let execute_coff = ImplantCapability::from_key("execute_coff");
+        let family = if capabilities.contains(&execute_coff) {
             "coff_loader"
         } else {
             "unknown"
@@ -99,8 +107,8 @@ mod tests {
 
         let registry = ImplantRegistry::new();
         let record = registry
-            .upsert_registration(
-                Uuid::new_v4(),
+            .register(
+                None,
                 RegisterPayload {
                     implant_type: family.to_string(),
                     protocol_version: 1,
@@ -111,8 +119,15 @@ mod tests {
                     os: "windows".to_string(),
                     arch: "x64".to_string(),
                 },
+                if capabilities.contains(&execute_coff) {
+                    ImplantFamily::CoffLoader
+                } else {
+                    ImplantFamily::Unknown("unknown".to_string())
+                },
+                capabilities.clone(),
             )
-            .await;
+            .await
+            .unwrap();
 
         if capabilities == record.capabilities {
             record
@@ -132,6 +147,7 @@ mod tests {
         let result = service
             .queue_task_for_implant(
                 &implant,
+                "test",
                 TaskSpec::execute_coff(
                     "whoami.obj".to_string(),
                     vec![0x41],
@@ -147,11 +163,12 @@ mod tests {
     #[tokio::test]
     async fn queue_and_complete_execute_coff_task() {
         let service = TaskService::new();
-        let implant = implant_with_capabilities(vec![ImplantCapability::ExecuteCoff]).await;
+        let implant = implant_with_capabilities(vec![ImplantCapability::from_key("execute_coff")]).await;
 
         let task = service
             .queue_task_for_implant(
                 &implant,
+                "test",
                 TaskSpec::execute_coff(
                     "whoami.obj".to_string(),
                     vec![0x41],
@@ -162,22 +179,26 @@ mod tests {
             .await
             .unwrap();
 
-        let fetched = service.fetch_tasks(implant.identity.clientid, 1).await;
-        assert_eq!(fetched.tasks.len(), 1);
-        assert_eq!(fetched.tasks[0].task_id, task.task_id);
+        let fetched = service.lease_tasks(implant.identity.clientid, 1).await;
+        assert_eq!(fetched.len(), 1);
+        assert_eq!(fetched[0].task_id, task.task_id);
 
         let completed = service
-            .record_result(TaskResultPayload {
-                task_id: task.task_id,
-                status: "success".to_string(),
-                result_encoding: "utf8".to_string(),
-                result_data: "host\\user".to_string(),
-            })
+            .complete_result(
+                task.task_id,
+                super::super::types::TaskStatus::Completed,
+                super::super::types::TaskResultData::Text {
+                    encoding: "utf8".to_string(),
+                    data: "host\\user".to_string(),
+                },
+            )
             .await
             .unwrap();
 
         match completed.result {
-            Some(TaskResultData::Text { data, .. }) => assert_eq!(data, "host\\user"),
+            Some(super::super::types::TaskResultData::Text { data, .. }) => {
+                assert_eq!(data, "host\\user")
+            }
             _ => panic!("missing text result"),
         }
     }

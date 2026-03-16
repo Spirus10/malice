@@ -1,5 +1,3 @@
-use super::capabilities::ImplantCapability;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImplantFamily {
     CoffLoader,
@@ -7,17 +5,10 @@ pub enum ImplantFamily {
 }
 
 impl ImplantFamily {
-    pub fn from_type(implant_type: &str) -> Self {
-        match implant_type {
-            "coff_loader" => Self::CoffLoader,
-            other => Self::Unknown(other.to_string()),
-        }
-    }
-
-    pub fn capabilities(&self) -> Vec<ImplantCapability> {
+    pub fn key(&self) -> &str {
         match self {
-            Self::CoffLoader => vec![ImplantCapability::ExecuteCoff],
-            Self::Unknown(_) => Vec::new(),
+            Self::CoffLoader => "coff_loader",
+            Self::Unknown(other) => other.as_str(),
         }
     }
 }

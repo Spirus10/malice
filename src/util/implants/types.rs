@@ -64,3 +64,9 @@ impl ImplantRecord {
         self.capabilities.contains(&capability)
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct TaskingMetadata {
+    pub command_names: Vec<String>,
+    pub command_help: Vec<String>,
+}

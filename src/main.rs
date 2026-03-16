@@ -1,3 +1,5 @@
+//! Starts the terminal UI and routes fatal startup/runtime errors to stderr.
+
 use std::error::Error;
 
 mod ui;

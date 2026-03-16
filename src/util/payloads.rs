@@ -9,24 +9,22 @@ pub struct PayloadArtifact {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Clone)]
-pub struct PayloadRepository {
-    search_roots: Vec<PathBuf>,
+pub trait ArtifactSource {
+    fn resolve(&self, logical_name: &str, search_roots: &[PathBuf]) -> Result<PayloadArtifact>;
 }
+
+#[derive(Clone, Default)]
+pub struct PayloadRepository;
 
 impl PayloadRepository {
     pub fn new() -> Self {
-        Self {
-            search_roots: vec![
-                PathBuf::from("implant/zant/out/build/msvc-debug/payloads"),
-                PathBuf::from("implant/zant/out/build/msvc-release/payloads"),
-                PathBuf::from("implant/zant/out/build/default/payloads"),
-            ],
-        }
+        Self
     }
+}
 
-    pub fn resolve(&self, logical_name: &str) -> Result<PayloadArtifact> {
-        for root in &self.search_roots {
+impl ArtifactSource for PayloadRepository {
+    fn resolve(&self, logical_name: &str, search_roots: &[PathBuf]) -> Result<PayloadArtifact> {
+        for root in search_roots {
             let candidate = root.join(format!("{logical_name}.obj"));
             if candidate.exists() {
                 return Ok(PayloadArtifact {
@@ -43,10 +41,10 @@ impl PayloadRepository {
         Err(Error::new(
             ErrorKind::NotFound,
             format!(
-                "Payload '{logical_name}' was not found under {}",
-                self.search_roots
+                "Artifact '{logical_name}' was not found under {}",
+                search_roots
                     .iter()
-                    .map(|root| display_path(root))
+                    .map(|path| display_path(path))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),

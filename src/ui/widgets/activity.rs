@@ -1,3 +1,5 @@
+//! Renders recent activity for the whole teamserver or the focused implant.
+
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},

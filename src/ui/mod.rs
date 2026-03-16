@@ -1,3 +1,5 @@
+//! Terminal UI modules and the exported `run` entry point.
+
 mod actions;
 mod app;
 mod controller;

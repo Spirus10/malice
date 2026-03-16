@@ -15,6 +15,11 @@ use crate::util::{
     router::PacketReply,
 };
 
+/// Handles an implant heartbeat packet.
+///
+/// @param context Shared application state used to update implant liveness.
+/// @param packet Parsed packet envelope containing the heartbeat payload.
+/// @return Future that resolves to the packet reply sent back to the implant.
 pub fn handle(
     context: Arc<ServerContext>,
     packet: Packet,

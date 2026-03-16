@@ -1,3 +1,5 @@
+//! Command dispatcher and shared helper types for operator commands.
+
 use std::{collections::HashMap, error::Error, fmt, future::Future, pin::Pin, process, sync::Arc};
 
 use tokio::sync::Mutex;
@@ -58,6 +60,9 @@ impl CommandOutput {
 }
 
 impl CommandContext {
+    /// Starts the HTTP server and records the corresponding activity event.
+    ///
+    /// @return Renderable command output or a command error if startup fails.
     pub async fn start_server(&self) -> Result<CommandOutput, CommandError> {
         let mut server = self.server.lock().await;
         server
@@ -80,6 +85,9 @@ impl CommandContext {
         )))
     }
 
+    /// Stops the HTTP server and records the corresponding activity event.
+    ///
+    /// @return Renderable command output confirming shutdown.
     pub async fn stop_server(&self) -> CommandOutput {
         let mut server = self.server.lock().await;
         server.close().await;
@@ -111,6 +119,12 @@ impl CommandContext {
             .await
     }
 
+    /// Queues one operator-requested task for a target implant.
+    ///
+    /// @param clientid Implant identifier that should receive the task.
+    /// @param task_kind User-facing task name to queue.
+    /// @param args Additional task arguments supplied by the operator.
+    /// @return Queued task record or a command error if queueing fails.
     pub async fn queue_task(
         &self,
         clientid: Uuid,
@@ -152,6 +166,9 @@ pub struct CommandHandler {
 }
 
 impl CommandHandler {
+    /// Creates a handler backed by a fresh server context and HTTP server.
+    ///
+    /// @return Command handler ready to parse and execute operator commands.
     pub async fn new() -> Self {
         let server = HttpServer::new(ServerContext::new());
         Self {
@@ -162,10 +179,18 @@ impl CommandHandler {
         }
     }
 
+    /// Parses raw command text into the internal command model.
+    ///
+    /// @param cmd Raw command line entered by the operator.
+    /// @return Parsed command or a command error if validation fails.
     pub fn parse_command(cmd: &str) -> Result<ParsedCommand, CommandError> {
         parser::parse_command(cmd).map_err(CommandError::new)
     }
 
+    /// Executes a parsed command and returns its rendered output.
+    ///
+    /// @param command Parsed command ready for dispatch.
+    /// @return Renderable command output or a command error if execution fails.
     pub async fn handle(&self, command: ParsedCommand) -> Result<CommandOutput, CommandError> {
         match command {
             ParsedCommand::Exit => process::exit(0),
@@ -187,11 +212,18 @@ impl CommandHandler {
         handler(self.context.clone(), command).await
     }
 
+    /// Returns the shared command context for direct callers like the TUI.
+    ///
+    /// @return Shared command context exposing server-backed operations.
     pub fn context(&self) -> Arc<CommandContext> {
         self.context.clone()
     }
 }
 
+/// Parses a UUID argument supplied to the command layer.
+///
+/// @param input Raw UUID string from a command argument.
+/// @return Parsed UUID or a command error if the input is invalid.
 pub fn parse_uuid(input: &str) -> Result<Uuid, CommandError> {
     input
         .parse::<Uuid>()

@@ -15,6 +15,11 @@ use crate::util::{
     tasks::FetchTaskRequest,
 };
 
+/// Handles a task-poll packet and leases queued work to the implant.
+///
+/// @param context Shared application state used to lease tasks.
+/// @param packet Parsed packet envelope containing the fetch request.
+/// @return Future that resolves to the packet reply sent back to the implant.
 pub fn handle(
     context: Arc<ServerContext>,
     packet: Packet,
@@ -23,31 +28,42 @@ pub fn handle(
         match packet.parse_data::<FetchTaskRequest>() {
             Ok(request) => match parse_clientid(packet.clientid()) {
                 Ok(clientid) => {
-                    let response = context
-                        .tasks()
-                        .fetch_tasks(clientid, request.want.unwrap_or(1))
-                        .await;
-                    context
-                        .implants()
-                        .set_active_task(clientid, response.tasks.first().map(|task| task.task_id))
-                        .await;
-                    if let Some(task) = response.tasks.first() {
-                        context
-                            .record_activity(
-                                ActivitySeverity::Info,
-                                format!("leased {} for {}", task.task_type, clientid),
-                                Some(clientid),
-                                Some(task.task_id),
-                            )
-                            .await;
-                    }
+                    match context
+                        .fetch_tasks_for_implant(clientid, request.want.unwrap_or(1))
+                        .await
+                    {
+                        Ok(response) => {
+                            context
+                                .implants()
+                                .set_active_task(
+                                    clientid,
+                                    response.tasks.first().map(|task| task.task_id),
+                                )
+                                .await;
+                            if let Some(task) = response.tasks.first() {
+                                context
+                                    .record_activity(
+                                        ActivitySeverity::Info,
+                                        format!("leased {} for {}", task.task_type, clientid),
+                                        Some(clientid),
+                                        Some(task.task_id),
+                                    )
+                                    .await;
+                            }
 
-                    PacketReply::packet(
-                        StatusCode::OK,
-                        packet.opcode_kind(),
-                        packet.clientid(),
-                        &response,
-                    )
+                            PacketReply::packet(
+                                StatusCode::OK,
+                                packet.opcode_kind(),
+                                packet.clientid(),
+                                &response,
+                            )
+                        }
+                        Err(err) => error_reply(
+                            &packet,
+                            StatusCode::BAD_REQUEST,
+                            &err.to_string(),
+                        ),
+                    }
                 }
                 Err(err) => error_reply(&packet, StatusCode::BAD_REQUEST, &err.to_string()),
             },

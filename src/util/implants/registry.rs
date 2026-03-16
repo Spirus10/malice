@@ -9,11 +9,11 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::{
-    family::ImplantFamily,
     types::{
         HeartbeatPayload, ImplantIdentity, ImplantRecord, ImplantRuntimeState,
         ImplantStaticMetadata, RegisterPayload,
     },
+    ImplantCapability, ImplantFamily,
 };
 
 #[derive(Clone)]
@@ -22,21 +22,41 @@ pub struct ImplantRegistry {
 }
 
 impl ImplantRegistry {
+    /// Creates an empty implant registry.
+    ///
+    /// @return Registry ready to store implant records by client ID.
     pub fn new() -> Self {
         Self {
             implants: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub async fn upsert_registration(
+    /// Inserts or refreshes the registration record for an implant.
+    ///
+    /// @param requested_clientid Optional implant identifier previously issued by the server.
+    /// @param payload Registration payload describing the host and process.
+    /// @return The updated implant record after registration is applied.
+    pub async fn register(
         &self,
-        clientid: Uuid,
+        requested_clientid: Option<Uuid>,
         payload: RegisterPayload,
-    ) -> ImplantRecord {
+        family: ImplantFamily,
+        capabilities: Vec<ImplantCapability>,
+    ) -> Result<ImplantRecord> {
         let now = SystemTime::now();
-        let family = ImplantFamily::from_type(&payload.implant_type);
-        let capabilities = family.capabilities();
         let mut lock = self.implants.lock().await;
+        let clientid = match requested_clientid {
+            Some(clientid) => {
+                if !lock.contains_key(&clientid) {
+                    return Err(Error::new(
+                        ErrorKind::NotFound,
+                        "Unknown implant identifier; registration requires a server-issued client ID",
+                    ));
+                }
+                clientid
+            }
+            None => Uuid::new_v4(),
+        };
 
         let record = lock
             .entry(clientid)
@@ -82,9 +102,14 @@ impl ImplantRegistry {
                 },
             });
 
-        record.clone()
+        Ok(record.clone())
     }
 
+    /// Applies a heartbeat update to an existing implant record.
+    ///
+    /// @param clientid Implant identifier supplied by the runtime.
+    /// @param payload Heartbeat payload containing the current runtime status.
+    /// @return Updated implant record or an I/O error if the implant is unknown.
     pub async fn update_heartbeat(
         &self,
         clientid: Uuid,
@@ -102,6 +127,9 @@ impl ImplantRegistry {
         Ok(record.clone())
     }
 
+    /// Returns all known implant records in stable display order.
+    ///
+    /// @return Implant records sorted for operator display.
     pub async fn list(&self) -> Vec<ImplantRecord> {
         let lock = self.implants.lock().await;
         let mut records: Vec<_> = lock.values().cloned().collect();
@@ -114,10 +142,19 @@ impl ImplantRegistry {
         records
     }
 
+    /// Returns a single implant record by client ID.
+    ///
+    /// @param clientid Implant identifier to look up.
+    /// @return Implant record when found, otherwise `None`.
     pub async fn get(&self, clientid: &Uuid) -> Option<ImplantRecord> {
         self.implants.lock().await.get(clientid).cloned()
     }
 
+    /// Updates the currently active task for an implant, if the record exists.
+    ///
+    /// @param clientid Implant identifier to update.
+    /// @param task_id Active task identifier, or `None` to clear it.
+    /// @return None.
     pub async fn set_active_task(&self, clientid: Uuid, task_id: Option<Uuid>) {
         if let Some(record) = self.implants.lock().await.get_mut(&clientid) {
             record.runtime_state.active_task_id = task_id;

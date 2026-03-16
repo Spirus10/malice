@@ -1,3 +1,5 @@
+//! Renders the keyboard shortcut help overlay.
+
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     text::Line,
@@ -25,7 +27,10 @@ pub fn render(frame: &mut Frame, area: Rect) {
         Line::from("Enter submit"),
         Line::from("Esc return to browse"),
         Line::from("Up/Down history in the active command context"),
-        Line::from("Agent commands: whoami, help, back"),
+        Line::from("Agent commands come from the selected implant integration plus help and back"),
+        Line::from("Task actions: press `t` to open integration-provided task shortcuts"),
+        Line::from("Task kinds depend on the selected implant family"),
+        Line::from("Example: task queue selected ls \"C:\\\\Users\\\\Public\\\\*\""),
     ];
     let widget = Paragraph::new(lines)
         .block(Block::default().title("Help").borders(Borders::ALL))

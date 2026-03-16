@@ -1,149 +1,160 @@
 # Modular Architecture Guide
 
-This document explains the current teamserver architecture after the modularity refactor. It is written for developers who want to:
+This document describes the current teamserver architecture as implemented today.
 
-- implement a new implant family
+It is for developers who want to:
+
+- add a new implant family
 - add a new task type
-- add new packet handlers
-- extend the operator CLI without turning it back into a monolith
-
-This guide describes the current code, not just the target design.
+- add a new opcode handler
+- extend the operator UI or CLI without pushing family logic back into the core
 
 ## Design Goals
 
-The refactor introduced explicit extension seams so that new functionality is additive instead of invasive.
+The current architecture is organized around these goals:
 
-The main goals are:
-
-- transport code should not know implant-specific behavior
-- task queueing should be typed and capability-aware
-- operator commands should be registered by domain
-- payload resolution should be abstracted behind a repository
-- packet routing should be split into per-opcode handlers
+- keep transport code transport-only
+- keep implant-family specifics behind integrations
+- keep task queueing typed and capability-aware
+- keep operator commands modular
+- keep packet handling split by opcode
+- keep artifact lookup separate from integration logic
 
 ## High-Level Layout
 
-Current top-level modules:
+Current top-level teamserver modules:
 
-- [src/util/app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs)
-  - shared application context
-- [src/util/httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs)
-  - HTTP transport only
-- [src/util/packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
-  - wire framing and packet encode/decode
-- [src/util/router](/C:/Users/wammu/source/repos/malice/src/util/router/mod.rs)
-  - opcode routing and per-opcode handlers
-- [src/util/implants](/C:/Users/wammu/source/repos/malice/src/util/implants/mod.rs)
-  - implant identity, capabilities, runtime state, registry
-- [src/util/tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks/mod.rs)
-  - typed task specs, queueing, serialization, results
-- [src/util/payloads.rs](/C:/Users/wammu/source/repos/malice/src/util/payloads.rs)
-  - payload lookup by logical name
-- [src/util/command](/C:/Users/wammu/source/repos/malice/src/util/command/mod.rs)
-  - CLI parsing, dispatch, output, and domain handlers
+- [app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs)
+  - shared `ServerContext`
+- [httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs)
+  - HTTP transport shim
+- [admission.rs](/C:/Users/wammu/source/repos/malice/src/util/admission.rs)
+  - request admission policy
+- [packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
+  - packet framing and decode helpers
+- [router](/C:/Users/wammu/source/repos/malice/src/util/router)
+  - opcode router and handlers
+- [implants](/C:/Users/wammu/source/repos/malice/src/util/implants)
+  - implant identity, runtime state, registry, capabilities
+- [tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks)
+  - typed task specs, queueing, repository, results
+- [payloads.rs](/C:/Users/wammu/source/repos/malice/src/util/payloads.rs)
+  - generic artifact lookup
+- [integrations](/C:/Users/wammu/source/repos/malice/src/util/integrations)
+  - manifest-backed implant integrations
+- [command](/C:/Users/wammu/source/repos/malice/src/util/command)
+  - CLI parsing, dispatch, and output
+- [ui](/C:/Users/wammu/source/repos/malice/src/ui)
+  - `ratatui` UI and integration-driven actions
 
 ## Core Request Flow
 
 An implant request currently flows like this:
 
-1. `HttpServer` accepts `POST /packet`.
-2. The raw request body is parsed into `Packet`.
-3. `PacketRouter` looks up a handler by `PacketOpcode`.
-4. The handler uses `ServerContext` services such as:
-   - implant registry
-   - task service
-   - payload repository
-5. The handler returns a transport-agnostic `PacketReply`.
-6. The HTTP layer converts `PacketReply` into an HTTP response.
+1. `HttpServer` accepts `POST /packet`
+2. the body is parsed into `Packet`
+3. admission policy validates the request
+4. `PacketRouter` dispatches by `PacketOpcode`
+5. the handler uses `ServerContext`
+6. the handler returns `PacketReply`
+7. HTTP converts `PacketReply` into the response
 
-That separation matters because a new implant family should require changes in implant parsing, capability mapping, task handling, or routing, but not in the HTTP transport shim.
+That boundary matters because implant-specific behavior should live in integrations and handlers, not in the HTTP shim.
 
 ## ServerContext
 
-[src/util/app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs) is the main service container.
+[app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs) is the service container.
 
 `ServerContext` currently owns:
 
 - `ImplantRegistry`
 - `TaskService`
 - `PayloadRepository`
+- `ImplantIntegrationRegistry`
 - `PacketRouter`
+- `ActivityLog`
+- `AdmissionPolicy`
 
-Use `ServerContext` when new behavior needs shared access to application services. Do not push new business logic down into `HttpServer`.
+`ServerContext` is where generic server behavior coordinates:
+
+- registration
+- task queueing
+- task fetch serialization
+- task result decoding
+- UI-facing integration metadata
 
 ## Transport Layer
 
-[src/util/httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs) is intentionally thin.
+[httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs) is intentionally thin.
 
 Its responsibilities are:
 
-- bind and listen on the configured socket
+- bind the socket
 - accept HTTP requests
 - enforce `POST /packet`
 - read the request body
-- parse a `Packet`
-- forward the packet to the router
-- return the resulting response
+- parse `Packet`
+- build request context for admission
+- hand the packet to the router
+- return the router response
 
 It should not:
 
-- locate payload files
-- decide whether an implant supports a task
-- build implant records
-- implement task queueing policy
+- resolve artifacts
+- build task specs
+- decode task results
+- assign implant capabilities
 
-If a feature proposal requires editing `HttpServer` for anything other than transport mechanics, that is usually a smell.
+## Admission Layer
+
+[admission.rs](/C:/Users/wammu/source/repos/malice/src/util/admission.rs) owns request-level policy checks.
+
+Today it contains:
+
+- `PacketRequestContext`
+- `AdmissionPolicy`
+- `RegisterHeaderPolicy`
+
+That separation keeps registration policy out of the HTTP transport and makes future policy changes local.
 
 ## Packet Layer
 
-[src/util/packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs) owns the wire framing.
-
-Current important types:
+[packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs) owns:
 
 - `Packet`
 - `PacketOpcode`
+- packet encode/decode
+- inner payload deserialization
 
-Current responsibilities:
+If you add a new implant message type:
 
-- decode the opcode-prefixed wire format
-- expose the client ID from the outer packet
-- deserialize the inner payload with `parse_data`
-- build response packets with `Packet::build`
-
-If you need a new implant message type, start by adding a new `PacketOpcode`, then register a handler for it in the router.
+1. add a new `PacketOpcode`
+2. add a handler
+3. register the handler in the router
 
 ## Packet Router
 
-The router lives under [src/util/router](/C:/Users/wammu/source/repos/malice/src/util/router/mod.rs).
+The router lives under [router](/C:/Users/wammu/source/repos/malice/src/util/router).
 
 Important files:
 
-- [src/util/router/registry.rs](/C:/Users/wammu/source/repos/malice/src/util/router/registry.rs)
-- [src/util/router/reply.rs](/C:/Users/wammu/source/repos/malice/src/util/router/reply.rs)
-- [src/util/router/handlers/register.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/register.rs)
-- [src/util/router/handlers/heartbeat.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/heartbeat.rs)
-- [src/util/router/handlers/fetch_task.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/fetch_task.rs)
-- [src/util/router/handlers/task_result.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/task_result.rs)
+- [registry.rs](/C:/Users/wammu/source/repos/malice/src/util/router/registry.rs)
+- [reply.rs](/C:/Users/wammu/source/repos/malice/src/util/router/reply.rs)
+- [register.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/register.rs)
+- [heartbeat.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/heartbeat.rs)
+- [fetch_task.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/fetch_task.rs)
+- [task_result.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/task_result.rs)
 
-The pattern is:
+Pattern:
 
-- `PacketRouter` stores a registry of opcode -> handler
-- each handler parses its own payload type
-- each handler talks to `ServerContext`
-- each handler returns `PacketReply`
-
-To add a new opcode:
-
-1. Add the opcode to `PacketOpcode` in [src/util/packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs).
-2. Create a new handler file under [src/util/router/handlers](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/mod.rs).
-3. Register it in [src/util/router/registry.rs](/C:/Users/wammu/source/repos/malice/src/util/router/registry.rs).
-4. Add or reuse the payload DTO the handler needs.
-
-This keeps new protocol behavior local instead of growing one global match block.
+- router maps opcode to handler
+- each handler parses its own payload
+- handlers talk to `ServerContext`
+- handlers return `PacketReply`
 
 ## Implant Model
 
-The implant domain lives under [src/util/implants](/C:/Users/wammu/source/repos/malice/src/util/implants/mod.rs).
+The implant model lives under [implants](/C:/Users/wammu/source/repos/malice/src/util/implants).
 
 Important types:
 
@@ -154,57 +165,87 @@ Important types:
 - `ImplantCapability`
 - `ImplantRegistry`
 
-This split is important:
+The split is:
 
-- identity describes what the implant is
-- static metadata describes host and process details
-- capabilities describe what the implant can do
-- runtime state describes liveness and active execution state
+- identity
+  - who the implant is
+- static metadata
+  - host and process details
+- capabilities
+  - capability keys declared by the integration
+- runtime state
+  - liveness, status, and active task
 
-### Implant Families
+### Implant families
 
-[src/util/implants/family.rs](/C:/Users/wammu/source/repos/malice/src/util/implants/family.rs) maps `implant_type` strings to internal family descriptors.
+[family.rs](/C:/Users/wammu/source/repos/malice/src/util/implants/family.rs) is now a coarse family classifier, not the source of truth for task catalogs or capabilities.
 
-That file currently defines:
+Current variants:
 
 - `ImplantFamily::CoffLoader`
-- `ImplantFamily::Unknown`
+- `ImplantFamily::Unknown(String)`
 
-Each family provides a capability list. Right now the `coff_loader` family advertises:
+The detailed capability set now comes from the selected integration, typically through its manifest.
 
-- `ImplantCapability::ExecuteCoff`
+## Integrations
 
-### Adding A New Implant Family
-
-To add a new implant family safely:
-
-1. Add a new `ImplantFamily` variant in [src/util/implants/family.rs](/C:/Users/wammu/source/repos/malice/src/util/implants/family.rs).
-2. Extend `ImplantFamily::from_type` to recognize the new `implant_type` string.
-3. Define the capabilities returned by `ImplantFamily::capabilities`.
-4. Ensure the implant registers with the expected `implant_type`.
-5. If the implant needs new packet types, add router handlers for those opcodes.
-6. If the implant supports new tasks, add new `TaskSpec` variants and serializers.
-
-The key point is that a new implant family should primarily affect:
-
-- family mapping
-- capabilities
-- task support
-- message handlers
-
-It should not require changes to the HTTP transport layer.
-
-## Task System
-
-The task domain lives under [src/util/tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks/mod.rs).
+The integration layer lives under [integrations](/C:/Users/wammu/source/repos/malice/src/util/integrations).
 
 Important files:
 
-- [src/util/tasks/types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
-- [src/util/tasks/queue.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/queue.rs)
-- [src/util/tasks/repository.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/repository.rs)
-- [src/util/tasks/serializer.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/serializer.rs)
-- [src/util/tasks/results.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/results.rs)
+- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/types.rs)
+- [manifest.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/manifest.rs)
+- [registry.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/registry.rs)
+- [zant.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/zant.rs)
+- [manifest.json](/C:/Users/wammu/source/repos/malice/integrations/zant/manifest.json)
+
+An integration owns:
+
+- accepted `implant_type`
+- supported protocol versions
+- capability keys
+- task catalog
+- UI action metadata
+- task building
+- task envelope serialization
+- result decoding
+
+This is the main boundary that keeps implant-family logic out of the core.
+
+### Adding a new implant family
+
+To add a new family safely:
+
+1. create an integration manifest under `integrations/<name>/manifest.json`
+2. create a Rust integration module under `src/util/integrations/`
+3. implement `ImplantIntegration`
+4. register it in `ImplantIntegrationRegistry`
+5. make the implant register with the matching `implant_type`
+6. add any new `TaskSpec` variants if the family needs new execution models
+
+You should not need to edit the HTTP transport layer.
+
+## Capability Model
+
+Capabilities are now dynamic keys, not a closed enum of built-ins.
+
+Important current behavior:
+
+- manifests can declare `execute_coff` and arbitrary custom capability keys
+- capability values are preserved on the implant record
+- task validation compares required capability keys to the implant's declared capability keys
+
+That means integrations can describe new capabilities without changing the core type definition.
+
+## Task System
+
+The task domain lives under [tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks).
+
+Important files:
+
+- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
+- [queue.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/queue.rs)
+- [repository.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/repository.rs)
 
 Important types:
 
@@ -214,172 +255,148 @@ Important types:
 - `TaskResultPayload`
 - `TaskResultData`
 
-### Why `TaskSpec` Exists
-
-`TaskSpec` replaces stringly typed task definitions and COFF-specific queue methods.
-
-Current example:
+Current concrete task spec:
 
 - `TaskSpec::ExecuteCoff`
 
-Each task spec defines:
+`TaskSpec` currently defines:
 
-- its logical task type string via `task_type()`
-- its required implant capability via `required_capability()`
+- `task_type()`
+- `required_capability()`
 
-That capability check is enforced in [src/util/tasks/queue.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/queue.rs) before a task is queued.
+That capability check is enforced before queueing in [queue.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/queue.rs).
 
-### Adding A New Task Type
+### Important current boundary
 
-To add a new task kind:
+The task repository/service no longer owns task-envelope serialization or result decoding.
 
-1. Add a new `TaskSpec` variant in [src/util/tasks/types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs).
-2. Add any typed task payload struct it needs.
-3. Extend `task_type()` and `required_capability()`.
-4. Extend the serializer in [src/util/tasks/serializer.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/serializer.rs).
-5. Update result handling if the task returns a new result shape.
-6. Add command-side support if operators need to queue it from the CLI.
-7. Add tests that verify unsupported implants cannot receive the task.
+Those responsibilities now live in the selected implant integration.
 
-Do not add bespoke queue methods like `queue_run_process`, `queue_download`, and so on unless there is a strong reason. The preferred pattern is generic queueing through `TaskSpec`.
+### Adding a new task type
 
-## Payload Repository
+To add a new execution model:
 
-[src/util/payloads.rs](/C:/Users/wammu/source/repos/malice/src/util/payloads.rs) isolates payload lookup from the transport and command layers.
+1. add a new `TaskSpec` variant
+2. add the typed payload struct it needs
+3. update `task_type()` and `required_capability()`
+4. update any integrations that should build or serialize that task
+5. update result decoding for those integrations
+6. add tests for capability validation and round-trip behavior
+
+Avoid adding bespoke queue methods for each task kind. Keep queueing generic and let integrations map operator-facing task kinds into `TaskSpec`.
+
+## Artifact Repository
+
+[payloads.rs](/C:/Users/wammu/source/repos/malice/src/util/payloads.rs) is now a generic artifact source.
 
 Current behavior:
 
-- the caller asks for a logical payload name such as `whoami`
-- the repository resolves it to an artifact file on disk
-- the repository returns bytes plus the resolved file name
+- caller provides a logical artifact name plus search roots
+- repository resolves the file on disk
+- repository returns the file name and bytes
 
-If you add more payload families or output locations, extend the repository. Do not hard-code file paths in:
+It does not:
 
-- `HttpServer`
-- packet handlers
-- CLI command handlers
+- define task catalogs
+- define argument packing rules
+- know about one implant family
+
+Those behaviors belong in the integration layer.
 
 ## CLI Architecture
 
-The CLI lives under [src/util/command](/C:/Users/wammu/source/repos/malice/src/util/command/mod.rs).
+The CLI lives under [command](/C:/Users/wammu/source/repos/malice/src/util/command).
 
 Important files:
 
-- [src/util/command/parser.rs](/C:/Users/wammu/source/repos/malice/src/util/command/parser.rs)
-- [src/util/command/dispatcher.rs](/C:/Users/wammu/source/repos/malice/src/util/command/dispatcher.rs)
-- [src/util/command/output.rs](/C:/Users/wammu/source/repos/malice/src/util/command/output.rs)
-- [src/util/command/commands/server.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/server.rs)
-- [src/util/command/commands/implants.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/implants.rs)
-- [src/util/command/commands/tasks.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/tasks.rs)
+- [parser.rs](/C:/Users/wammu/source/repos/malice/src/util/command/parser.rs)
+- [dispatcher.rs](/C:/Users/wammu/source/repos/malice/src/util/command/dispatcher.rs)
+- [output.rs](/C:/Users/wammu/source/repos/malice/src/util/command/output.rs)
+- [server.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/server.rs)
+- [implants.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/implants.rs)
+- [tasks.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/tasks.rs)
 
 The split is:
 
 - parser
-  - turns input text into typed commands
+  - raw text to typed commands
 - dispatcher
-  - routes parsed commands to registered domain handlers
+  - typed commands to handlers
 - output
-  - prints domain objects cleanly
+  - formatting
 - command handlers
-  - implement server, implant, and task command behavior
+  - domain behavior
 
-### Adding A New Operator Command
-
-There are two cases:
-
-If the new behavior belongs to an existing domain:
-
-1. extend the parsed command type in [src/util/command/parser.rs](/C:/Users/wammu/source/repos/malice/src/util/command/parser.rs)
-2. update that domain handler under [src/util/command/commands](/C:/Users/wammu/source/repos/malice/src/util/command/commands/mod.rs)
-
-If the new behavior is a new domain:
-
-1. add a new parsed command branch
-2. add a new command handler file
-3. register it in [src/util/command/commands/mod.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/mod.rs)
-
-Avoid reintroducing a single global executor function.
-
-### Current Generic Task Command
-
-The current operator-facing queue flow is:
+Current generic task command:
 
 ```text
 task queue <clientid> <task-kind> [args...]
 ```
 
-For the current COFF path, that means:
+The key point is that operator-facing task kinds are resolved through the selected integration instead of being hard-coded in the command layer.
 
-```text
-task queue <clientid> execute_coff [payload-name] [entrypoint] [args...]
-```
+## UI Architecture
 
-Examples:
+The `ratatui` UI lives under [ui](/C:/Users/wammu/source/repos/malice/src/ui).
 
-```text
-task queue 513a666c-3349-40dd-9462-95c4449b0d0d execute_coff
-task queue 513a666c-3349-40dd-9462-95c4449b0d0d execute_coff whoami
-task queue 513a666c-3349-40dd-9462-95c4449b0d0d execute_coff whoami main
-```
+Important current behavior:
+
+- selected implant actions are driven by integration metadata
+- task menu entries come from the integration manifest and module
+- the UI no longer hard-codes family-specific commands like `whoami`
+
+That keeps the operator surface aligned with the selected implant family without pushing those definitions into the core UI.
 
 ## How To Implement A New Implant
 
-If you are writing a new implant, treat these parts as the contract:
+If you are writing a new implant, treat these as the contract:
 
-- the wire format in [docs/wire-format.md](/C:/Users/wammu/source/repos/malice/docs/wire-format.md)
-- the packet opcodes in [src/util/packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
-- the expected registration fields in [src/util/implants/types.rs](/C:/Users/wammu/source/repos/malice/src/util/implants/types.rs)
-- the task response format in [src/util/tasks/types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
+- [wire-format.md](/C:/Users/wammu/source/repos/malice/docs/wire-format.md)
+- [core-messages.md](/C:/Users/wammu/source/repos/malice/docs/protocol/v1/core-messages.md)
+- [packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
+- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
+- [integration types](/C:/Users/wammu/source/repos/malice/src/util/integrations/types.rs)
 
 At a minimum, an implant should be able to:
 
-1. generate or persist a `clientid`
+1. persist or generate a `clientid`
 2. send `REGISTER`
 3. send `HEARTBEAT`
 4. poll with `FETCH_TASK`
 5. parse returned tasks
-6. execute supported tasks
+6. execute or emulate supported tasks
 7. return `TASK_RESULT`
-
-For a new implant family, also decide:
-
-- what `implant_type` string it will register with
-- what capabilities it should advertise through the server-side family map
-- whether it reuses existing task types or needs new ones
-- whether it needs any family-specific opcodes
 
 ## Recommended Extension Workflow
 
 When extending the system, prefer this order:
 
-1. Define the capability model first.
-2. Define or update the task spec second.
-3. Update implant family mapping.
-4. Add or update packet handlers.
-5. Add command support last.
+1. define capability keys and task catalog in the integration manifest
+2. define or update the Rust integration
+3. add or update `TaskSpec` only if a new execution model is needed
+4. add or update packet handlers
+5. add UI and command polish last
 
-That order keeps the operator interface as a thin layer over already-correct domain behavior.
+That order keeps the operator surface thin and keeps new family work localized.
 
 ## Guardrails
 
-When making changes, preserve these invariants:
+Preserve these invariants:
 
-- do not put payload path resolution into the HTTP server
-- do not queue tasks without checking implant capabilities
-- do not add implant-specific behavior directly to transport code
-- do not collapse task specs back into free-form strings
-- do not add new top-level CLI behavior through one giant match block
-
-If a proposed change violates one of those rules, it probably belongs in a domain module instead.
+- do not put artifact resolution into `HttpServer`
+- do not put registration policy checks into the transport shim
+- do not queue tasks without capability validation
+- do not move family-specific task logic back into the core UI or command parser
+- do not hard-code one implant family's task catalog into the payload repository
 
 ## Current Limitations
 
-This refactor created the extension seams, but some areas are still intentionally minimal:
+The current architecture is still intentionally small in scope:
 
-- only one explicit capability is implemented today: `ExecuteCoff`
-- only one task spec is implemented today: `ExecuteCoff`
-- task result typing is still simple and currently text-oriented
-- family mapping is code-based, not plugin-based
+- only one concrete `TaskSpec` is implemented today: `ExecuteCoff`
+- result typing is still simple and largely text-oriented
+- integrations are statically linked, not runtime-loaded
 - persistence is still in-memory
+- admission policy is still simple
 
-That is acceptable for the current stage. The important part is that future work can now be added without reworking the transport or CLI foundations.
+That is acceptable for the current stage. The important part is that new family work is now additive and mostly integration-scoped instead of transport-scoped.

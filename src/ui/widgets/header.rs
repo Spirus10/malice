@@ -1,3 +1,5 @@
+//! Renders the dashboard header and high-level context summary.
+
 use ratatui::{
     style::{Color, Style},
     text::{Line, Span},

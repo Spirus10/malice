@@ -1,3 +1,5 @@
+//! Implant inspection commands exposed through the operator console.
+
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::util::command::{
