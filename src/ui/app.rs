@@ -127,14 +127,19 @@ fn render_footer(frame: &mut Frame, area: ratatui::layout::Rect, state: &UiState
         );
     frame.render_widget(status, sections[0]);
 
-    let hints = ratatui::widgets::Paragraph::new(
-        "j/k move | Enter bind agent | : teamserver | a agent | Tab switch | v result | q quit",
-    )
-    .style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray))
-    .block(
-        ratatui::widgets::Block::default()
-            .title("Keys")
-            .borders(ratatui::widgets::Borders::ALL),
-    );
+    let hint_text = match state.mode {
+        Mode::ResultViewer => {
+            "j/k scroll | PgUp/PgDn page | Home/End jump | Esc close"
+        }
+        _ => "j/k move | Enter bind agent | : teamserver | a agent | Tab switch | v result | q quit",
+    };
+
+    let hints = ratatui::widgets::Paragraph::new(hint_text)
+        .style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray))
+        .block(
+            ratatui::widgets::Block::default()
+                .title("Keys")
+                .borders(ratatui::widgets::Borders::ALL),
+        );
     frame.render_widget(hints, sections[1]);
 }

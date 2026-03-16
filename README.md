@@ -44,7 +44,8 @@ Current implementation is intentionally narrow. The primary end-to-end task path
 - [`src/core/implants`](/src/core/implants): implant identity, family mapping, capabilities, registry
 - [`src/core/tasks`](/src/core/tasks): generic queueing, repository, transport envelopes, and results
 - [`src/core/payloads.rs`](/src/core/payloads.rs): payload artifact lookup for logical task names
-- [`implant/zant/plugin`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin): sample installable `zant` plugin package source owned by the implant repo
+- [`implant/zant/plugin`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin): sample installable `zant` plugin package owned by the implant repo
+- [`implant/zant/plugin-src`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin-src): source for the `zant` plugin worker binary shipped in the package
 - [`src/core/command`](/src/core/command): operator command parsing, dispatch, and output
 - [`docs/wire-format.md`](/docs/wire-format.md): current packet format contract
 - [`docs/modular-architecture.md`](/docs/modular-architecture.md): extension seams and server-side architecture
@@ -193,7 +194,7 @@ cargo test
 
 ### `zant` submodule
 
-`malice` now loads implant integrations from the local plugin store under `plugins/`. This repo includes a sample install source for `zant` under [`implant/zant/plugin`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin), but it is not auto-installed or auto-activated at startup.
+`malice` now loads implant integrations from the local plugin store under `plugins/`. This repo includes a sample install package for `zant` under [`implant/zant/plugin`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin), but it is not auto-installed or auto-activated at startup.
 
 To exercise the plugin flow explicitly:
 
@@ -208,6 +209,15 @@ That copies the package into:
 - `plugins/active/zant`
 
 If an active plugin's artifacts are missing, task queueing for payload-backed tasks will fail at payload resolution time.
+
+The install package contains only the files required for installation and execution:
+
+- `plugin.json`
+- `manifest.json`
+- `bin/plugin.exe`
+- `artifacts/`
+
+The source used to build `bin/plugin.exe` lives separately under [`implant/zant/plugin-src`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin-src).
 
 ## Current Operator Commands
 

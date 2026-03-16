@@ -7,7 +7,7 @@ It is written against the current codebase, where:
 - the teamserver owns core orchestration
 - implant-family specifics are delivered as installable plugin packages
 - integration metadata is declared in a package-local manifest
-- runtime execution logic is still host-adapter-backed today, with package install and activation already separated from the core binary
+- runtime execution logic is delivered by a package-local plugin worker declared in `plugin.json`
 
 Use this document when you want to:
 
@@ -83,6 +83,7 @@ Relevant files:
 - [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
 - [src/core/integrations/loaded.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/loaded.rs)
 - [src/core/integrations/worker.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/worker.rs)
+- [src/core/integrations/plugin_api.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/plugin_api.rs)
 
 ### Integration manifest
 
@@ -401,6 +402,7 @@ Create a plugin package directory such as:
 implant/stub/plugin/
   plugin.json
   manifest.json
+  bin/
   artifacts/
 ```
 
@@ -414,6 +416,10 @@ A minimal example:
   "plugin_id": "stub",
   "version": "0.1.0",
   "plugin_api_version": 1,
+  "runtime": {
+    "type": "stdio",
+    "command": ["bin/plugin.exe"]
+  },
   "manifest_path": "manifest.json",
   "min_core_version": "0.1.0",
   "artifact_roots": ["artifacts"]
@@ -460,223 +466,33 @@ Notes:
 - custom capabilities are useful for describing what the implant can do without adding a new core task enum variant.
 - queue validation compares the queued task's required capability key to the implant record; execution semantics stay inside the integration.
 
-### Step 2: Add the Rust integration module
+### Step 2: Add the plugin worker project
 
-Create something like:
+Create a sibling source tree for the worker runtime, separate from the install package:
 
 ```text
-src/core/integrations/stub.rs
+implant/stub/
+  plugin/
+    plugin.json
+    manifest.json
+    bin/
+      plugin.exe
+    artifacts/
+  plugin-src/
+    Cargo.toml
+    src/
+      main.rs
 ```
 
-For the current codebase, a minimal manifest-backed integration can look like this:
+The worker should implement the JSON operations described in [internal-docs/plugin-api-v1-design.md](/C:/Users/wammu/source/repos/malice/internal-docs/plugin-api-v1-design.md):
 
-```rust
-use std::{
-    io::{Error, ErrorKind, Result},
-    path::{Path, PathBuf},
-};
+- `get_manifest`
+- `validate_registration`
+- `build_task`
+- `serialize_task`
+- `decode_result`
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use uuid::Uuid;
-
-use crate::core::{
-    implants::{ImplantCapability, ImplantFamily, ImplantRecord, RegisterPayload},
-    payloads::{ArtifactSource, PayloadArtifact},
-    tasks::{QueuedTask, TaskEnvelope, TaskRecord, TaskResultData, TaskResultPayload, TaskStatus},
-};
-
-use super::{
-    manifest::{IntegrationManifest, ManifestArgMode},
-    types::{ImplantIntegration, TaskDefinition, UiActionDefinition},
-};
-
-#[derive(Debug, Clone)]
-struct PayloadDefinition {
-    command_name: String,
-    logical_name: String,
-    entrypoint: String,
-    usage: String,
-    arg_mode: ManifestArgMode,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StubTaskState {
-    task_type: String,
-    object_name: String,
-    entrypoint: String,
-    object_encoding: String,
-    object_data: String,
-    args_encoding: String,
-    args_data: String,
-}
-
-pub struct StubIntegration {
-    manifest: IntegrationManifest,
-    capabilities: Vec<ImplantCapability>,
-    task_definitions: Vec<TaskDefinition>,
-    ui_actions: Vec<UiActionDefinition>,
-    payload_definitions: Vec<PayloadDefinition>,
-}
-
-impl StubIntegration {
-    pub fn load(path: &Path) -> Result<Self> {
-        let manifest = IntegrationManifest::load(path)?;
-        let capabilities = manifest.capabilities()?;
-        let task_definitions = manifest.task_definitions();
-        let ui_actions = manifest.ui_actions();
-        let payload_definitions = manifest
-            .tasks
-            .iter()
-            .map(|task| PayloadDefinition {
-                command_name: task.kind.clone(),
-                logical_name: task.artifact.clone(),
-                entrypoint: task.entrypoint.clone(),
-                usage: task.usage.clone(),
-                arg_mode: task.arg_mode.clone(),
-            })
-            .collect();
-
-        Ok(Self {
-            manifest,
-            capabilities,
-            task_definitions,
-            ui_actions,
-            payload_definitions,
-        })
-    }
-}
-
-impl ImplantIntegration for StubIntegration {
-    fn id(&self) -> &str {
-        &self.manifest.id
-    }
-
-    fn implant_type(&self) -> &str {
-        &self.manifest.implant_type
-    }
-
-    fn family(&self) -> ImplantFamily {
-        ImplantFamily::Unknown(self.manifest.family.clone())
-    }
-
-    fn capabilities(&self) -> &[ImplantCapability] {
-        &self.capabilities
-    }
-
-    fn task_definitions(&self) -> &[TaskDefinition] {
-        &self.task_definitions
-    }
-
-    fn ui_actions(&self) -> &[UiActionDefinition] {
-        &self.ui_actions
-    }
-
-    fn validate_registration(&self, payload: &RegisterPayload) -> Result<()> {
-        if payload.implant_type != self.implant_type() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("unexpected implant type '{}'", payload.implant_type),
-            ));
-        }
-
-        if self.manifest.protocol_versions.contains(&payload.protocol_version) {
-            Ok(())
-        } else {
-            Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("unsupported protocol version {}", payload.protocol_version),
-            ))
-        }
-    }
-
-    fn build_task(
-        &self,
-        _implant: &ImplantRecord,
-        task_kind: &str,
-        _args: &[String],
-        artifacts: &dyn ArtifactSource,
-    ) -> Result<Option<QueuedTask>> {
-        let Some(definition) = self
-            .payload_definitions
-            .iter()
-            .find(|definition| definition.command_name == task_kind)
-        else {
-            return Ok(None);
-        };
-
-        let search_roots: Vec<PathBuf> = self
-            .manifest
-            .artifact_roots
-            .iter()
-            .map(PathBuf::from)
-            .collect();
-        let artifact: PayloadArtifact =
-            artifacts.resolve(&definition.logical_name, &search_roots)?;
-
-        Ok(Some(QueuedTask {
-            kind: definition.command_name.clone(),
-            required_capability: ImplantCapability::from_key("execute_coff"),
-            state: serde_json::to_value(StubTaskState {
-                task_type: "execute_coff".to_string(),
-                object_name: artifact.file_name,
-                entrypoint: definition.entrypoint.clone(),
-                object_encoding: "base64".to_string(),
-                object_data: STANDARD.encode(&artifact.bytes),
-                args_encoding: "base64".to_string(),
-                args_data: STANDARD.encode(Vec::<u8>::new()),
-            })
-            .map_err(|err| Error::new(ErrorKind::InvalidData, err.to_string()))?,
-        }))
-    }
-
-    fn serialize_task(&self, task: &TaskRecord) -> Result<TaskEnvelope> {
-        let state: StubTaskState = serde_json::from_value(task.state.clone())
-            .map_err(|err| Error::new(ErrorKind::InvalidData, err.to_string()))?;
-        let Value::Object(mut fields) = serde_json::to_value(&state)
-            .map_err(|err| Error::new(ErrorKind::InvalidData, err.to_string()))?
-        else {
-            return Err(Error::new(ErrorKind::InvalidData, "task state was not an object"));
-        };
-        fields.remove("task_type");
-        Ok(TaskEnvelope {
-            task_id: task.task_id,
-            task_type: state.task_type,
-            fields,
-        })
-    }
-
-    fn decode_result(
-        &self,
-        _task: &TaskRecord,
-        payload: TaskResultPayload,
-    ) -> Result<(Uuid, TaskStatus, TaskResultData)> {
-        let status = if payload.status.eq_ignore_ascii_case("success") {
-            TaskStatus::Completed
-        } else {
-            TaskStatus::Failed
-        };
-
-        Ok((
-            payload.task_id,
-            status,
-            TaskResultData::Text {
-                encoding: payload.result_encoding,
-                data: payload.result_data,
-            },
-        ))
-    }
-}
-```
-
-That example is intentionally simple:
-
-- it loads manifest metadata from disk
-- it validates `implant_type` and protocol version
-- it maps manifest task entries into a generic queued task plus integration-owned state
-- it serializes the current `execute_coff` task envelope inside the integration
-- it decodes results as text
+The teamserver handles package install, activation, process management, artifact lookup, and task persistence. The worker only implements implant-family-specific behavior.
 
 Capability note:
 
@@ -684,13 +500,18 @@ Capability note:
 - `execute_coff` is declared and stored the same way as every other capability key
 - task validation compares capabilities by key rather than by a special enum variant or task enum
 
-### Step 3: Register it
+### Step 3: Build the worker into the package
 
-Add the integration to:
+Build the worker under `plugin-src/` and place the runnable binary in `plugin/bin/`.
 
-- [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
+The install package should only contain files required at install and runtime:
 
-That remains the temporary bridge for this branch. The install and activation flow is already package-based, but new runtime behavior still needs a host adapter until the dynamic plugin ABI is implemented.
+- `plugin.json`
+- `manifest.json`
+- `bin/plugin.exe`
+- `artifacts/`
+
+Do not ship Cargo sources or `target/` inside the install package.
 
 ### Step 4: Install and activate the package
 
@@ -889,12 +710,13 @@ Future result shapes could include:
 2. Add fetch-task polling.
 3. Add one fake task executor.
 4. Add the plugin package under the implant repo.
-5. Add the server-side integration manifest and package metadata.
-6. Add the server-side host adapter.
-7. Install and activate the package.
-8. Validate task round-trip.
-9. Replace fake execution with one real executor.
-10. Expand task catalog only after the lifecycle is stable.
+5. Add the plugin manifest and package metadata.
+6. Add the plugin worker source under `plugin-src/`.
+7. Build the worker into `plugin/bin/`.
+8. Install and activate the package.
+9. Validate task round-trip.
+10. Replace fake execution with one real executor.
+11. Expand task catalog only after the lifecycle is stable.
 
 ## Reference Files
 

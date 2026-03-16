@@ -27,6 +27,12 @@ pub fn map_key(mode: Mode, key: KeyEvent) -> Option<UiAction> {
         },
         Mode::ResultViewer => match key.code {
             KeyCode::Esc | KeyCode::Char('v') => Some(UiAction::CloseOverlay),
+            KeyCode::Down | KeyCode::Char('j') => Some(UiAction::ResultScrollDown),
+            KeyCode::Up | KeyCode::Char('k') => Some(UiAction::ResultScrollUp),
+            KeyCode::PageDown => Some(UiAction::ResultPageDown),
+            KeyCode::PageUp => Some(UiAction::ResultPageUp),
+            KeyCode::Home | KeyCode::Char('g') => Some(UiAction::ResultScrollTop),
+            KeyCode::End | KeyCode::Char('G') => Some(UiAction::ResultScrollBottom),
             _ => None,
         },
         Mode::TaskMenu => match key.code {
