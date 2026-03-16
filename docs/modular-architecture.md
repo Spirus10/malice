@@ -24,25 +24,25 @@ The current architecture is organized around these goals:
 
 Current top-level teamserver modules:
 
-- [app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs)
+- [app.rs](/C:/Users/wammu/source/repos/malice/src/core/app.rs)
   - shared `ServerContext`
-- [httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs)
+- [httpserver.rs](/C:/Users/wammu/source/repos/malice/src/core/httpserver.rs)
   - HTTP transport shim
-- [admission.rs](/C:/Users/wammu/source/repos/malice/src/util/admission.rs)
+- [admission.rs](/C:/Users/wammu/source/repos/malice/src/core/admission.rs)
   - request admission policy
-- [packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
+- [packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs)
   - packet framing and decode helpers
-- [router](/C:/Users/wammu/source/repos/malice/src/util/router)
+- [router](/C:/Users/wammu/source/repos/malice/src/core/router)
   - opcode router and handlers
-- [implants](/C:/Users/wammu/source/repos/malice/src/util/implants)
+- [implants](/C:/Users/wammu/source/repos/malice/src/core/implants)
   - implant identity, runtime state, registry, capabilities
-- [tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks)
-  - typed task specs, queueing, repository, results
-- [payloads.rs](/C:/Users/wammu/source/repos/malice/src/util/payloads.rs)
+- [tasks](/C:/Users/wammu/source/repos/malice/src/core/tasks)
+  - generic task queueing, repository, transport envelopes, results
+- [payloads.rs](/C:/Users/wammu/source/repos/malice/src/core/payloads.rs)
   - generic artifact lookup
-- [integrations](/C:/Users/wammu/source/repos/malice/src/util/integrations)
+- [integrations](/C:/Users/wammu/source/repos/malice/src/core/integrations)
   - manifest-backed implant integrations
-- [command](/C:/Users/wammu/source/repos/malice/src/util/command)
+- [command](/C:/Users/wammu/source/repos/malice/src/core/command)
   - CLI parsing, dispatch, and output
 - [ui](/C:/Users/wammu/source/repos/malice/src/ui)
   - `ratatui` UI and integration-driven actions
@@ -63,7 +63,7 @@ That boundary matters because implant-specific behavior should live in integrati
 
 ## ServerContext
 
-[app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs) is the service container.
+[app.rs](/C:/Users/wammu/source/repos/malice/src/core/app.rs) is the service container.
 
 `ServerContext` currently owns:
 
@@ -85,7 +85,7 @@ That boundary matters because implant-specific behavior should live in integrati
 
 ## Transport Layer
 
-[httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs) is intentionally thin.
+[httpserver.rs](/C:/Users/wammu/source/repos/malice/src/core/httpserver.rs) is intentionally thin.
 
 Its responsibilities are:
 
@@ -107,7 +107,7 @@ It should not:
 
 ## Admission Layer
 
-[admission.rs](/C:/Users/wammu/source/repos/malice/src/util/admission.rs) owns request-level policy checks.
+[admission.rs](/C:/Users/wammu/source/repos/malice/src/core/admission.rs) owns request-level policy checks.
 
 Today it contains:
 
@@ -119,7 +119,7 @@ That separation keeps registration policy out of the HTTP transport and makes fu
 
 ## Packet Layer
 
-[packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs) owns:
+[packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs) owns:
 
 - `Packet`
 - `PacketOpcode`
@@ -134,16 +134,16 @@ If you add a new implant message type:
 
 ## Packet Router
 
-The router lives under [router](/C:/Users/wammu/source/repos/malice/src/util/router).
+The router lives under [router](/C:/Users/wammu/source/repos/malice/src/core/router).
 
 Important files:
 
-- [registry.rs](/C:/Users/wammu/source/repos/malice/src/util/router/registry.rs)
-- [reply.rs](/C:/Users/wammu/source/repos/malice/src/util/router/reply.rs)
-- [register.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/register.rs)
-- [heartbeat.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/heartbeat.rs)
-- [fetch_task.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/fetch_task.rs)
-- [task_result.rs](/C:/Users/wammu/source/repos/malice/src/util/router/handlers/task_result.rs)
+- [registry.rs](/C:/Users/wammu/source/repos/malice/src/core/router/registry.rs)
+- [reply.rs](/C:/Users/wammu/source/repos/malice/src/core/router/reply.rs)
+- [register.rs](/C:/Users/wammu/source/repos/malice/src/core/router/handlers/register.rs)
+- [heartbeat.rs](/C:/Users/wammu/source/repos/malice/src/core/router/handlers/heartbeat.rs)
+- [fetch_task.rs](/C:/Users/wammu/source/repos/malice/src/core/router/handlers/fetch_task.rs)
+- [task_result.rs](/C:/Users/wammu/source/repos/malice/src/core/router/handlers/task_result.rs)
 
 Pattern:
 
@@ -154,7 +154,7 @@ Pattern:
 
 ## Implant Model
 
-The implant model lives under [implants](/C:/Users/wammu/source/repos/malice/src/util/implants).
+The implant model lives under [implants](/C:/Users/wammu/source/repos/malice/src/core/implants).
 
 Important types:
 
@@ -178,7 +178,7 @@ The split is:
 
 ### Implant families
 
-[family.rs](/C:/Users/wammu/source/repos/malice/src/util/implants/family.rs) is now a coarse family classifier, not the source of truth for task catalogs or capabilities.
+`ImplantFamily` in [types.rs](/C:/Users/wammu/source/repos/malice/src/core/implants/types.rs) is now a coarse family classifier, not the source of truth for task catalogs or capabilities.
 
 Current variants:
 
@@ -189,14 +189,14 @@ The detailed capability set now comes from the selected integration, typically t
 
 ## Integrations
 
-The integration layer lives under [integrations](/C:/Users/wammu/source/repos/malice/src/util/integrations).
+The integration layer lives under [integrations](/C:/Users/wammu/source/repos/malice/src/core/integrations).
 
 Important files:
 
-- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/types.rs)
-- [manifest.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/manifest.rs)
-- [registry.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/registry.rs)
-- [zant.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/zant.rs)
+- [types.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
+- [manifest.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/manifest.rs)
+- [registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
+- [zant.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/zant.rs)
 - [manifest.json](/C:/Users/wammu/source/repos/malice/integrations/zant/manifest.json)
 
 An integration owns:
@@ -217,11 +217,11 @@ This is the main boundary that keeps implant-family logic out of the core.
 To add a new family safely:
 
 1. create an integration manifest under `integrations/<name>/manifest.json`
-2. create a Rust integration module under `src/util/integrations/`
+2. create a Rust integration module under `src/core/integrations/`
 3. implement `ImplantIntegration`
 4. register it in `ImplantIntegrationRegistry`
 5. make the implant register with the matching `implant_type`
-6. add any new `TaskSpec` variants if the family needs new execution models
+6. keep the family's execution semantics inside its integration module
 
 You should not need to edit the HTTP transport layer.
 
@@ -235,36 +235,35 @@ Important current behavior:
 - capability values are preserved on the implant record
 - task validation compares required capability keys to the implant's declared capability keys
 
-That means integrations can describe new capabilities without changing the core type definition.
+That means integrations can describe new capabilities without changing a core task enum.
 
 ## Task System
 
-The task domain lives under [tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks).
+The task domain lives under [tasks](/C:/Users/wammu/source/repos/malice/src/core/tasks).
 
 Important files:
 
-- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
-- [queue.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/queue.rs)
-- [repository.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/repository.rs)
+- [types.rs](/C:/Users/wammu/source/repos/malice/src/core/tasks/types.rs)
+- [queue.rs](/C:/Users/wammu/source/repos/malice/src/core/tasks/queue.rs)
+- [repository.rs](/C:/Users/wammu/source/repos/malice/src/core/tasks/repository.rs)
 
 Important types:
 
-- `TaskSpec`
+- `QueuedTask`
 - `TaskRecord`
+- `TaskEnvelope`
 - `TaskStatus`
 - `TaskResultPayload`
 - `TaskResultData`
 
-Current concrete task spec:
+The core task layer now owns:
 
-- `TaskSpec::ExecuteCoff`
+- queue-time capability validation
+- generic persisted metadata such as `task_kind`
+- opaque integration-owned task state
+- transport-neutral task lifecycle state
 
-`TaskSpec` currently defines:
-
-- `task_type()`
-- `required_capability()`
-
-That capability check is enforced before queueing in [queue.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/queue.rs).
+That capability check is enforced before queueing in [queue.rs](/C:/Users/wammu/source/repos/malice/src/core/tasks/queue.rs), but the core no longer defines concrete execution variants.
 
 ### Important current boundary
 
@@ -272,22 +271,22 @@ The task repository/service no longer owns task-envelope serialization or result
 
 Those responsibilities now live in the selected implant integration.
 
-### Adding a new task type
+### Adding a new execution model
 
 To add a new execution model:
 
-1. add a new `TaskSpec` variant
-2. add the typed payload struct it needs
-3. update `task_type()` and `required_capability()`
-4. update any integrations that should build or serialize that task
-5. update result decoding for those integrations
+1. define the operator-facing task catalog and capability keys in the integration manifest
+2. add the integration-owned task-state struct in that integration module
+3. build a `QueuedTask` with the required capability and opaque state
+4. serialize the implant-facing envelope in that integration
+5. decode results in that integration
 6. add tests for capability validation and round-trip behavior
 
-Avoid adding bespoke queue methods for each task kind. Keep queueing generic and let integrations map operator-facing task kinds into `TaskSpec`.
+Avoid adding bespoke queue methods for each task kind. Keep queueing generic and let integrations own execution semantics.
 
 ## Artifact Repository
 
-[payloads.rs](/C:/Users/wammu/source/repos/malice/src/util/payloads.rs) is now a generic artifact source.
+[payloads.rs](/C:/Users/wammu/source/repos/malice/src/core/payloads.rs) is now a generic artifact source.
 
 Current behavior:
 
@@ -305,16 +304,14 @@ Those behaviors belong in the integration layer.
 
 ## CLI Architecture
 
-The CLI lives under [command](/C:/Users/wammu/source/repos/malice/src/util/command).
+The CLI lives under [command](/C:/Users/wammu/source/repos/malice/src/core/command).
 
 Important files:
 
-- [parser.rs](/C:/Users/wammu/source/repos/malice/src/util/command/parser.rs)
-- [dispatcher.rs](/C:/Users/wammu/source/repos/malice/src/util/command/dispatcher.rs)
-- [output.rs](/C:/Users/wammu/source/repos/malice/src/util/command/output.rs)
-- [server.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/server.rs)
-- [implants.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/implants.rs)
-- [tasks.rs](/C:/Users/wammu/source/repos/malice/src/util/command/commands/tasks.rs)
+- [parser.rs](/C:/Users/wammu/source/repos/malice/src/core/command/parser.rs)
+- [dispatcher.rs](/C:/Users/wammu/source/repos/malice/src/core/command/dispatcher.rs)
+- [output.rs](/C:/Users/wammu/source/repos/malice/src/core/command/output.rs)
+- [commands/mod.rs](/C:/Users/wammu/source/repos/malice/src/core/command/commands/mod.rs)
 
 The split is:
 
@@ -353,9 +350,8 @@ If you are writing a new implant, treat these as the contract:
 
 - [wire-format.md](/C:/Users/wammu/source/repos/malice/docs/wire-format.md)
 - [core-messages.md](/C:/Users/wammu/source/repos/malice/docs/protocol/v1/core-messages.md)
-- [packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
-- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
-- [integration types](/C:/Users/wammu/source/repos/malice/src/util/integrations/types.rs)
+- [packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs)
+- [integration types](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
 
 At a minimum, an implant should be able to:
 
@@ -373,7 +369,7 @@ When extending the system, prefer this order:
 
 1. define capability keys and task catalog in the integration manifest
 2. define or update the Rust integration
-3. add or update `TaskSpec` only if a new execution model is needed
+3. add or update the integration-owned task state for that runtime
 4. add or update packet handlers
 5. add UI and command polish last
 
@@ -393,7 +389,7 @@ Preserve these invariants:
 
 The current architecture is still intentionally small in scope:
 
-- only one concrete `TaskSpec` is implemented today: `ExecuteCoff`
+- only one integration-owned execution model is implemented today: `zant`'s COFF task envelope
 - result typing is still simple and largely text-oriented
 - integrations are statically linked, not runtime-loaded
 - persistence is still in-memory

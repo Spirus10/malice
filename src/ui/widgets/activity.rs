@@ -9,8 +9,8 @@ use ratatui::{
 };
 
 use crate::{
+    core::{activity::ActivitySeverity, command::output},
     ui::state::UiState,
-    util::{activity::ActivitySeverity, command::output},
 };
 
 pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &UiState) {

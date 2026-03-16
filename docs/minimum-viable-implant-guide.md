@@ -60,10 +60,10 @@ The teamserver core owns:
 
 Relevant files:
 
-- [src/util/app.rs](/C:/Users/wammu/source/repos/malice/src/util/app.rs)
-- [src/util/router](/C:/Users/wammu/source/repos/malice/src/util/router)
-- [src/util/tasks](/C:/Users/wammu/source/repos/malice/src/util/tasks)
-- [src/util/httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs)
+- [src/core/app.rs](/C:/Users/wammu/source/repos/malice/src/core/app.rs)
+- [src/core/router](/C:/Users/wammu/source/repos/malice/src/core/router)
+- [src/core/tasks](/C:/Users/wammu/source/repos/malice/src/core/tasks)
+- [src/core/httpserver.rs](/C:/Users/wammu/source/repos/malice/src/core/httpserver.rs)
 
 ### Server-side implant integration
 
@@ -73,14 +73,15 @@ Each implant family should have a server-side integration that knows:
 - which protocol versions it supports
 - which capabilities it exposes
 - which task kinds it offers
-- how to build concrete `TaskSpec` values
+- how to build queued task metadata plus integration-owned task state
+- how to serialize implant-facing task envelopes
 - how to decode task results
 
 Relevant files:
 
-- [src/util/integrations/types.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/types.rs)
-- [src/util/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/registry.rs)
-- [src/util/integrations/zant.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/zant.rs)
+- [src/core/integrations/types.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
+- [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
+- [src/core/integrations/zant.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/zant.rs)
 
 ### Integration manifest
 
@@ -149,7 +150,7 @@ The current wire format is defined in:
 
 - [docs/wire-format.md](/C:/Users/wammu/source/repos/malice/docs/wire-format.md)
 - [docs/protocol/v1/core-messages.md](/C:/Users/wammu/source/repos/malice/docs/protocol/v1/core-messages.md)
-- [src/util/packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
+- [src/core/packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs)
 
 ### Outer packet shape
 
@@ -173,7 +174,7 @@ Important detail:
 
 ### Current opcodes
 
-From [src/util/packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs):
+From [src/core/packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs):
 
 - `0x00` `Register`
 - `0x01` `FetchTask`
@@ -241,7 +242,7 @@ For registration, the current admission policy also expects this header:
 
 That policy currently lives in:
 
-- [src/util/admission.rs](/C:/Users/wammu/source/repos/malice/src/util/admission.rs)
+- [src/core/admission.rs](/C:/Users/wammu/source/repos/malice/src/core/admission.rs)
 
 If you create a second implant family, decide whether:
 
@@ -434,15 +435,15 @@ A minimal example:
 Notes:
 
 - `capabilities` can contain `execute_coff` and arbitrary custom values.
-- custom capabilities are useful for describing what the implant can do even before the core has a first-class `TaskSpec` for that behavior.
-- current queue validation is still strongest for existing task/spec paths such as `execute_coff`; for a new execution model you will usually add a new `TaskSpec` path later.
+- custom capabilities are useful for describing what the implant can do without adding a new core task enum variant.
+- queue validation compares the queued task's required capability key to the implant record; execution semantics stay inside the integration.
 
 ### Step 2: Add the Rust integration module
 
 Create something like:
 
 ```text
-src/util/integrations/stub.rs
+src/core/integrations/stub.rs
 ```
 
 For the current codebase, a minimal manifest-backed integration can look like this:
@@ -454,14 +455,14 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::util::{
+use crate::core::{
     implants::{ImplantCapability, ImplantFamily, ImplantRecord, RegisterPayload},
     payloads::{ArtifactSource, PayloadArtifact},
-    tasks::{
-        TaskEnvelope, TaskRecord, TaskResultData, TaskResultPayload, TaskSpec, TaskStatus,
-    },
+    tasks::{QueuedTask, TaskEnvelope, TaskRecord, TaskResultData, TaskResultPayload, TaskStatus},
 };
 
 use super::{
@@ -476,6 +477,17 @@ struct PayloadDefinition {
     entrypoint: String,
     usage: String,
     arg_mode: ManifestArgMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StubTaskState {
+    task_type: String,
+    object_name: String,
+    entrypoint: String,
+    object_encoding: String,
+    object_data: String,
+    args_encoding: String,
+    args_data: String,
 }
 
 pub struct StubIntegration {
@@ -567,7 +579,7 @@ impl ImplantIntegration for StubIntegration {
         task_kind: &str,
         _args: &[String],
         artifacts: &dyn ArtifactSource,
-    ) -> Result<Option<TaskSpec>> {
+    ) -> Result<Option<QueuedTask>> {
         let Some(definition) = self
             .payload_definitions
             .iter()
@@ -585,27 +597,36 @@ impl ImplantIntegration for StubIntegration {
         let artifact: PayloadArtifact =
             artifacts.resolve(&definition.logical_name, &search_roots)?;
 
-        Ok(Some(TaskSpec::execute_coff(
-            artifact.file_name,
-            artifact.bytes,
-            definition.entrypoint.clone(),
-            Vec::new(),
-        )))
+        Ok(Some(QueuedTask {
+            kind: definition.command_name.clone(),
+            required_capability: ImplantCapability::from_key("execute_coff"),
+            state: serde_json::to_value(StubTaskState {
+                task_type: "execute_coff".to_string(),
+                object_name: artifact.file_name,
+                entrypoint: definition.entrypoint.clone(),
+                object_encoding: "base64".to_string(),
+                object_data: STANDARD.encode(&artifact.bytes),
+                args_encoding: "base64".to_string(),
+                args_data: STANDARD.encode(Vec::<u8>::new()),
+            })
+            .map_err(|err| Error::new(ErrorKind::InvalidData, err.to_string()))?,
+        }))
     }
 
     fn serialize_task(&self, task: &TaskRecord) -> Result<TaskEnvelope> {
-        match &task.spec {
-            TaskSpec::ExecuteCoff(spec) => Ok(TaskEnvelope {
-                task_id: task.task_id,
-                task_type: task.spec.task_type().to_string(),
-                object_name: spec.object_name.clone(),
-                entrypoint: spec.entrypoint.clone(),
-                object_encoding: "base64".to_string(),
-                object_data: STANDARD.encode(&spec.object_bytes),
-                args_encoding: "base64".to_string(),
-                args_data: STANDARD.encode(&spec.args),
-            }),
-        }
+        let state: StubTaskState = serde_json::from_value(task.state.clone())
+            .map_err(|err| Error::new(ErrorKind::InvalidData, err.to_string()))?;
+        let Value::Object(mut fields) = serde_json::to_value(&state)
+            .map_err(|err| Error::new(ErrorKind::InvalidData, err.to_string()))?
+        else {
+            return Err(Error::new(ErrorKind::InvalidData, "task state was not an object"));
+        };
+        fields.remove("task_type");
+        Ok(TaskEnvelope {
+            task_id: task.task_id,
+            task_type: state.task_type,
+            fields,
+        })
     }
 
     fn decode_result(
@@ -635,21 +656,21 @@ That example is intentionally simple:
 
 - it loads manifest metadata from disk
 - it validates `implant_type` and protocol version
-- it maps manifest task entries into concrete `TaskSpec` values
-- it serializes the current `execute_coff` task envelope
+- it maps manifest task entries into a generic queued task plus integration-owned state
+- it serializes the current `execute_coff` task envelope inside the integration
 - it decodes results as text
 
 Capability note:
 
 - `manifest.capabilities()` now accepts any capability string
 - `execute_coff` is declared and stored the same way as every other capability key
-- task validation compares capabilities by key rather than by a special enum variant
+- task validation compares capabilities by key rather than by a special enum variant or task enum
 
 ### Step 3: Register it
 
 Add the integration to:
 
-- [src/util/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/registry.rs)
+- [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
 
 That is the only core registry change you should need for a new statically linked integration.
 
@@ -852,8 +873,8 @@ Useful starting points in this repo:
 - [docs/modular-architecture.md](/C:/Users/wammu/source/repos/malice/docs/modular-architecture.md)
 - [docs/wire-format.md](/C:/Users/wammu/source/repos/malice/docs/wire-format.md)
 - [docs/protocol/v1/core-messages.md](/C:/Users/wammu/source/repos/malice/docs/protocol/v1/core-messages.md)
-- [src/util/integrations/types.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/types.rs)
-- [src/util/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/util/integrations/registry.rs)
+- [src/core/integrations/types.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
+- [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
 - [integrations/zant/manifest.json](/C:/Users/wammu/source/repos/malice/integrations/zant/manifest.json)
 - [implant/zant/runtime/protocol.h](/C:/Users/wammu/source/repos/malice/implant/zant/runtime/protocol.h)
 

@@ -4,10 +4,10 @@ This document describes the current implant-facing packet format used by the `ma
 
 It reflects the current implementation in:
 
-- [packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs)
-- [httpserver.rs](/C:/Users/wammu/source/repos/malice/src/util/httpserver.rs)
-- [router](/C:/Users/wammu/source/repos/malice/src/util/router)
-- [types.rs](/C:/Users/wammu/source/repos/malice/src/util/tasks/types.rs)
+- [packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs)
+- [httpserver.rs](/C:/Users/wammu/source/repos/malice/src/core/httpserver.rs)
+- [router](/C:/Users/wammu/source/repos/malice/src/core/router)
+- [types.rs](/C:/Users/wammu/source/repos/malice/src/core/tasks/types.rs)
 - [protocol.h](/C:/Users/wammu/source/repos/malice/implant/zant/runtime/protocol.h)
 
 ## Status
@@ -96,7 +96,7 @@ If a future protocol version adds binary framing, it should define:
 
 The teamserver is authoritative for the current framing rules.
 
-In [packet.rs](/C:/Users/wammu/source/repos/malice/src/util/packet.rs):
+In [packet.rs](/C:/Users/wammu/source/repos/malice/src/core/packet.rs):
 
 - `Packet::new(...)` parses the opcode-prefixed packet
 - `Packet::build(...)` builds the opcode-prefixed packet
@@ -135,7 +135,7 @@ Registration currently also requires this header:
 
 - `x-malice-register: coff-loader-v1`
 
-That check is enforced by the admission layer in [admission.rs](/C:/Users/wammu/source/repos/malice/src/util/admission.rs), not by the packet framing itself.
+That check is enforced by the admission layer in [admission.rs](/C:/Users/wammu/source/repos/malice/src/core/admission.rs), not by the packet framing itself.
 
 ## Inner Payload Schemas
 
@@ -224,6 +224,7 @@ Important current behavior:
 - task responses are always a JSON object with a `tasks` array
 - empty work is returned as `{"tasks":[]}`
 - task envelopes are serialized by the selected server-side implant integration
+- the example above is the current `zant` envelope, not a core requirement for every future runtime
 
 ### Task Result
 

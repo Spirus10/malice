@@ -2,7 +2,7 @@
 
 use std::io::{Error, ErrorKind, Result};
 
-use crate::util::{
+use crate::core::{
     command::{tokenize_command_line, CommandHandler, ImplantCommand, ParsedCommand, TaskCommand},
     implants::ImplantRecord,
     integrations::DEFAULT_RESULT_ACTION_ID,
@@ -237,9 +237,8 @@ impl TuiController {
                 Ok(())
             }
             UiAction::TaskMenuNext => {
-                state.task_menu_index =
-                    (state.task_menu_index + 1)
-                        .min(state.data.task_menu_actions.len().saturating_sub(1));
+                state.task_menu_index = (state.task_menu_index + 1)
+                    .min(state.data.task_menu_actions.len().saturating_sub(1));
                 Ok(())
             }
             UiAction::TaskMenuPrevious => {
@@ -311,7 +310,12 @@ impl TuiController {
     }
 
     async fn confirm_task_menu(&self, state: &mut UiState) -> Result<()> {
-        let Some(action) = state.data.task_menu_actions.get(state.task_menu_index).cloned() else {
+        let Some(action) = state
+            .data
+            .task_menu_actions
+            .get(state.task_menu_index)
+            .cloned()
+        else {
             return Ok(());
         };
 
@@ -329,7 +333,10 @@ impl TuiController {
 
         if action.queue_immediately {
             let Some(task_kind) = action.task_kind else {
-                return Err(Error::new(ErrorKind::InvalidInput, "task action missing task kind"));
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "task action missing task kind",
+                ));
             };
             let record = self.bound_agent_record(state)?;
             let task = self

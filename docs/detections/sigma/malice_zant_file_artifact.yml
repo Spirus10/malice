@@ -1,0 +1,23 @@
+title: Malice Zant Persisted Client Identifier File
+id: 9f02df4d-dfd2-40fe-a4a8-236fa8c5595b
+status: experimental
+description: Detects creation or modification of the current Zant client identifier file under ProgramData.
+references:
+  - /C:/Users/wammu/source/repos/malice/implant/zant/runtime/config.cpp
+  - /C:/Users/wammu/source/repos/malice/implant/zant/runtime/runtime.cpp
+author: OpenAI Codex
+date: 2026-03-15
+tags:
+  - attack.defense-evasion
+  - attack.command-and-control
+  - attack.t1071
+logsource:
+  product: windows
+  category: file_event
+detection:
+  selection_target:
+    TargetFilename|endswith: \zant\clientid.txt
+  condition: selection_target
+falsepositives:
+  - Lab execution of this repository's implant runtime
+level: medium

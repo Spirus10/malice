@@ -1,0 +1,36 @@
+title: Malice Zant Implant Runtime Execution
+id: 26d72480-5869-4b67-a0b6-c0c5568a4935
+status: experimental
+description: Detects the current Zant implant runtime command line and packet endpoint usage on Windows hosts.
+references:
+  - /C:/Users/wammu/source/repos/malice/implant/zant/README.md
+  - /C:/Users/wammu/source/repos/malice/implant/zant/runtime/config.cpp
+  - /C:/Users/wammu/source/repos/malice/implant/zant/zant.cpp
+author: OpenAI Codex
+date: 2026-03-15
+tags:
+  - attack.execution
+  - attack.command-and-control
+  - attack.t1059
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection_image:
+    Image|endswith: \zant.exe
+  selection_run:
+    CommandLine|contains: " run "
+  selection_url:
+    CommandLine|contains: /packet
+  selection_flags_1:
+    CommandLine|contains: --heartbeat-seconds
+  selection_flags_2:
+    CommandLine|contains: --poll-seconds
+  selection_flags_3:
+    CommandLine|contains: --clientid-path
+  selection_flags_4:
+    CommandLine|contains: --once
+  condition: selection_image and selection_run and selection_url and 1 of selection_flags_*
+falsepositives:
+  - Lab execution of this repository's implant runtime
+level: medium

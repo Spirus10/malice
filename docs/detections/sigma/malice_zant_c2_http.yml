@@ -1,0 +1,54 @@
+title: Malice Zant C2 HTTP Packet Traffic
+id: 0f6809ec-c236-4ad0-9443-d2d5d4388818
+status: experimental
+description: Detects the current Zant implant HTTP transport used for registration, heartbeat, task polling, and task result upload.
+references:
+  - /C:/Users/wammu/source/repos/malice/implant/zant/runtime/transport.cpp
+  - /C:/Users/wammu/source/repos/malice/implant/zant/runtime/runtime.cpp
+  - /C:/Users/wammu/source/repos/malice/docs/wire-format.md
+author: OpenAI Codex
+date: 2026-03-15
+tags:
+  - attack.command-and-control
+  - attack.t1071.001
+logsource:
+  category: proxy
+  definition: Proxy or HTTP telemetry that preserves request method, URI stem, headers, and body content
+detection:
+  selection_method:
+    cs-method: POST
+  selection_uri:
+    cs-uri-stem: /packet
+  indicator_register_header:
+    request_headers|contains|all:
+      - X-Malice-Register
+      - coff-loader-v1
+  indicator_content_type:
+    request_headers|contains: "Content-Type: application/octet-stream"
+  indicator_user_agent_header:
+    request_headers|contains: "User-Agent: zant-coff-loader/1.0"
+  indicator_user_agent_field:
+    user_agent: zant-coff-loader/1.0
+  indicator_body_register:
+    request_body|contains|all:
+      - '"clientid":"'
+      - '\\"implant_type\\":\\"coff_loader\\"'
+      - '\\"protocol_version\\":1'
+  indicator_body_heartbeat:
+    request_body|contains|all:
+      - '"clientid":"'
+      - '\\"sequence\\":'
+      - '\\"status\\":\\"'
+  indicator_body_fetch:
+    request_body|contains|all:
+      - '"clientid":"'
+      - '\\"want\\":1'
+  indicator_body_result:
+    request_body|contains|all:
+      - '"clientid":"'
+      - '\\"task_id\\":\\"'
+      - '\\"result_encoding\\":\\"utf8\\"'
+  condition: selection_method and selection_uri and 1 of indicator_*
+falsepositives:
+  - Custom software reusing the same /packet route, headers, and escaped JSON packet format
+level: high

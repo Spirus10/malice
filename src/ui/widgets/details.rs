@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{ui::state::UiState, util::command::output};
+use crate::{core::command::output, ui::state::UiState};
 
 pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &UiState) {
     let lines = state

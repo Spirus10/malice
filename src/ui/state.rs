@@ -1,6 +1,6 @@
 //! Mutable UI state, including selection, overlays, and command buffers.
 
-use crate::util::{
+use crate::core::{
     activity::{ActivityEvent, ActivitySeverity},
     implants::{ImplantRecord, TaskingMetadata},
     integrations::UiActionDefinition,

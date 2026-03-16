@@ -2,9 +2,9 @@
 
 use std::error::Error;
 
+mod core;
 mod ui;
-mod util;
-use util::logger;
+use crate::core::logger;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

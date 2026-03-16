@@ -8,8 +8,8 @@ use ratatui::{
 };
 
 use crate::{
+    core::tasks::{TaskResultData, TaskStatus},
     ui::state::UiState,
-    util::tasks::{TaskResultData, TaskStatus},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, state: &UiState) {
@@ -20,7 +20,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &UiState) {
         let mut lines = vec![
             Line::from(format!("task_id: {}", task.task_id)),
             Line::from(format!("clientid: {}", task.clientid)),
-            Line::from(format!("task_type: {}", task.spec.task_type())),
+            Line::from(format!("task_type: {}", task.task_kind)),
             Line::from(format!("status: {:?}", task.status)),
             Line::from(""),
         ];
