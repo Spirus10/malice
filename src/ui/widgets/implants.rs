@@ -10,7 +10,6 @@ use ratatui::{
 use crate::ui::state::UiState;
 
 use super::details::heartbeat_age;
-
 pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &UiState) {
     let rows: Vec<Row> = state
         .data

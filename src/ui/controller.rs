@@ -160,6 +160,7 @@ impl TuiController {
             }
             UiAction::OpenResultViewer => {
                 if state.data.latest_task.is_some() {
+                    state.result_viewer_scroll = 0;
                     state.mode = Mode::ResultViewer;
                     state.set_status(StatusKind::Info, "latest result viewer");
                     Ok(())
@@ -174,6 +175,30 @@ impl TuiController {
                 state.mode = Mode::Browse;
                 state.teamserver_history_index = None;
                 state.agent_history_index = None;
+                Ok(())
+            }
+            UiAction::ResultScrollUp => {
+                state.result_viewer_scroll = state.result_viewer_scroll.saturating_sub(1);
+                Ok(())
+            }
+            UiAction::ResultScrollDown => {
+                state.result_viewer_scroll = state.result_viewer_scroll.saturating_add(1);
+                Ok(())
+            }
+            UiAction::ResultPageUp => {
+                state.result_viewer_scroll = state.result_viewer_scroll.saturating_sub(10);
+                Ok(())
+            }
+            UiAction::ResultPageDown => {
+                state.result_viewer_scroll = state.result_viewer_scroll.saturating_add(10);
+                Ok(())
+            }
+            UiAction::ResultScrollTop => {
+                state.result_viewer_scroll = 0;
+                Ok(())
+            }
+            UiAction::ResultScrollBottom => {
+                state.result_viewer_scroll = u16::MAX;
                 Ok(())
             }
             UiAction::Backspace => {

@@ -14,6 +14,10 @@ impl ImplantCapability {
     pub fn from_key(value: &str) -> Self {
         Self::new(value)
     }
+
+    pub fn key(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

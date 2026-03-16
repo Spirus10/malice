@@ -78,6 +78,7 @@ pub struct UiState {
     pub task_menu_index: usize,
     pub teamserver_output: Vec<String>,
     pub agent_output: Vec<String>,
+    pub result_viewer_scroll: u16,
 }
 
 impl Default for UiState {
@@ -103,6 +104,7 @@ impl Default for UiState {
             task_menu_index: 0,
             teamserver_output: Vec::new(),
             agent_output: Vec::new(),
+            result_viewer_scroll: 0,
         }
     }
 }
@@ -249,4 +251,31 @@ impl UiState {
         }
         self.agent_history_index = None;
     }
+
+    pub fn result_viewer_line_count(&self) -> usize {
+        let Some(task) = &self.data.latest_task else {
+            return 1;
+        };
+
+        let mut count = 5;
+        match &task.result {
+            Some(crate::core::tasks::TaskResultData::Text { data, .. }) => {
+                count += data.lines().count();
+            }
+            None => {
+                count += 1;
+            }
+        }
+
+        count
+    }
+
+    pub fn result_viewer_max_scroll(&self, viewport_height: u16) -> u16 {
+        let visible = usize::from(viewport_height.max(1));
+        self.result_viewer_line_count()
+            .saturating_sub(visible)
+            .try_into()
+            .unwrap_or(u16::MAX)
+    }
+
 }

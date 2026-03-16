@@ -195,9 +195,13 @@ Important files:
 
 - [types.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
 - [manifest.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/manifest.rs)
+- [package.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/package.rs)
+- [plugin_api.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/plugin_api.rs)
+- [worker.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/worker.rs)
+- [loaded.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/loaded.rs)
 - [registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
-- [zant.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/zant.rs)
-- [manifest.json](/C:/Users/wammu/source/repos/malice/integrations/zant/manifest.json)
+- [manifest.json](/C:/Users/wammu/source/repos/malice/implant/zant/plugin/manifest.json)
+- [plugin.json](/C:/Users/wammu/source/repos/malice/implant/zant/plugin/plugin.json)
 
 An integration owns:
 
@@ -216,14 +220,21 @@ This is the main boundary that keeps implant-family logic out of the core.
 
 To add a new family safely:
 
-1. create an integration manifest under `integrations/<name>/manifest.json`
-2. create a Rust integration module under `src/core/integrations/`
-3. implement `ImplantIntegration`
-4. register it in `ImplantIntegrationRegistry`
-5. make the implant register with the matching `implant_type`
-6. keep the family's execution semantics inside its integration module
+1. create a plugin package under the implant repo, for example `implant/<name>/plugin/`
+2. add `plugin.json` plus `manifest.json` to that package
+3. package any artifacts under the plugin package, typically `artifacts/`
+4. implement the runtime behavior behind the host integration boundary
+5. install the package with `plugins install <path>`
+6. activate it with `plugins activate <id> [version]`
+7. make the implant register with the matching `implant_type`
 
 You should not need to edit the HTTP transport layer.
+
+Today there is still one transitional limitation:
+
+- package installation and activation are dynamic
+- runtime behavior is now provided by worker-backed plugins launched from the active package
+- the first real worker-backed plugin is `zant`, so the public plugin authoring path is still early and lightly tooled
 
 ## Capability Model
 
@@ -391,7 +402,7 @@ The current architecture is still intentionally small in scope:
 
 - only one integration-owned execution model is implemented today: `zant`'s COFF task envelope
 - result typing is still simple and largely text-oriented
-- integrations are statically linked, not runtime-loaded
+- plugin packages are worker-backed over a JSON stdio contract rather than a richer SDK or sandboxed runtime
 - persistence is still in-memory
 - admission policy is still simple
 

@@ -1,5 +1,6 @@
 //! Command dispatcher and shared helper types for operator commands.
 
+use std::path::Path;
 use std::{collections::HashMap, error::Error, fmt, future::Future, pin::Pin, process, sync::Arc};
 
 use tokio::sync::Mutex;
@@ -144,6 +145,77 @@ impl CommandContext {
         self.server.lock().await.context().task_result(taskid).await
     }
 
+    pub async fn list_plugins(
+        &self,
+    ) -> Result<Vec<crate::core::integrations::InstalledPluginSummary>, CommandError> {
+        self.server
+            .lock()
+            .await
+            .context()
+            .list_plugins()
+            .map_err(|err| CommandError::new(err.to_string()))
+    }
+
+    pub async fn inspect_plugin(
+        &self,
+        plugin_id: &str,
+        version: Option<&str>,
+    ) -> Result<crate::core::integrations::PluginInspection, CommandError> {
+        self.server
+            .lock()
+            .await
+            .context()
+            .inspect_plugin(plugin_id, version)
+            .map_err(|err| CommandError::new(err.to_string()))
+    }
+
+    pub async fn install_plugin(
+        &self,
+        source: &str,
+    ) -> Result<crate::core::integrations::InstalledPluginSummary, CommandError> {
+        self.server
+            .lock()
+            .await
+            .context()
+            .install_plugin(Path::new(source))
+            .map_err(|err| CommandError::new(err.to_string()))
+    }
+
+    pub async fn activate_plugin(
+        &self,
+        plugin_id: &str,
+        version: Option<&str>,
+    ) -> Result<crate::core::integrations::InstalledPluginSummary, CommandError> {
+        self.server
+            .lock()
+            .await
+            .context()
+            .activate_plugin(plugin_id, version)
+            .map_err(|err| CommandError::new(err.to_string()))
+    }
+
+    pub async fn deactivate_plugin(&self, plugin_id: &str) -> Result<(), CommandError> {
+        self.server
+            .lock()
+            .await
+            .context()
+            .deactivate_plugin(plugin_id)
+            .map_err(|err| CommandError::new(err.to_string()))
+    }
+
+    pub async fn remove_plugin(&self, plugin_id: &str, version: &str) -> Result<(), CommandError> {
+        self.server
+            .lock()
+            .await
+            .context()
+            .remove_plugin(plugin_id, version)
+            .map_err(|err| CommandError::new(err.to_string()))
+    }
+
+    pub async fn plugin_load_errors(&self) -> Vec<String> {
+        self.server.lock().await.context().plugin_load_errors()
+    }
+
     pub async fn server_running(&self) -> bool {
         self.server.lock().await.is_running()
     }
@@ -196,6 +268,7 @@ impl CommandHandler {
             ParsedCommand::Exit => process::exit(0),
             ParsedCommand::Server(_) => self.execute("server", command).await,
             ParsedCommand::Implants(_) => self.execute("implants", command).await,
+            ParsedCommand::Plugins(_) => self.execute("plugins", command).await,
             ParsedCommand::Tasks(_) => self.execute("tasks", command).await,
         }
     }

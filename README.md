@@ -31,7 +31,7 @@ Today the repository contains two main components:
   - executes one entrypoint inside the current process
   - returns output through the teamserver protocol
 
-Current implementation is intentionally narrow. The primary end-to-end task path is the `zant` integration, which advertises manifest task kinds such as `whoami` and serializes them into its own `execute_coff` transport envelope backed by payload artifacts such as `whoami.obj`.
+Current implementation is intentionally narrow. The primary end-to-end task path is the `zant` plugin package, which advertises manifest task kinds such as `whoami` and serializes them into its own `execute_coff` transport envelope backed by payload artifacts such as `whoami.obj`.
 
 ## Repository Layout
 
@@ -44,6 +44,8 @@ Current implementation is intentionally narrow. The primary end-to-end task path
 - [`src/core/implants`](/src/core/implants): implant identity, family mapping, capabilities, registry
 - [`src/core/tasks`](/src/core/tasks): generic queueing, repository, transport envelopes, and results
 - [`src/core/payloads.rs`](/src/core/payloads.rs): payload artifact lookup for logical task names
+- [`implant/zant/plugin`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin): sample installable `zant` plugin package owned by the implant repo
+- [`implant/zant/plugin-src`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin-src): source for the `zant` plugin worker binary shipped in the package
 - [`src/core/command`](/src/core/command): operator command parsing, dispatch, and output
 - [`docs/wire-format.md`](/docs/wire-format.md): current packet format contract
 - [`docs/modular-architecture.md`](/docs/modular-architecture.md): extension seams and server-side architecture
@@ -110,13 +112,7 @@ Capability checks still happen before queueing so unsupported implant families d
 
 ### Payload resolution
 
-[`PayloadRepository`](/src/core/payloads.rs) maps a logical payload name such as `whoami` to an on-disk artifact. By default it searches:
-
-- `implant/zant/out/build/msvc-debug/payloads`
-- `implant/zant/out/build/msvc-release/payloads`
-- `implant/zant/out/build/default/payloads`
-
-This keeps artifact lookup out of transport and command code.
+[`PayloadRepository`](/src/core/payloads.rs) maps a logical payload name such as `whoami` to an on-disk artifact. Search roots come from the active plugin package manifest, so artifact lookup stays package-relative instead of assuming repo-local build output paths.
 
 ### Operator interface
 
@@ -165,7 +161,7 @@ The current protocol is intentionally simple and text-oriented. It is suitable f
 - applies relocations
 - invokes a selected entrypoint
 
-In the current integration model, the selected integration resolves payload artifacts, packs arguments, serializes the implant-facing task envelope, and decodes results. For `zant`, that means converting manifest task kinds into its COFF-loader task envelope. The default artifact path already assumes `zant` build outputs.
+In the current integration model, the selected integration resolves payload artifacts, packs arguments, serializes the implant-facing task envelope, and decodes results. For `zant`, that means converting manifest task kinds into its COFF-loader task envelope.
 
 See [`implant/zant/README.md`](/implant/zant/README.md) for loader-specific details.
 
@@ -198,24 +194,45 @@ cargo test
 
 ### `zant` submodule
 
-`malice` expects payload artifacts produced by the `zant` build. Build that component separately from [`implant/zant`](/implant/zant) using its own documented workflow.
+`malice` now loads implant integrations from the local plugin store under `plugins/`. This repo includes a sample install package for `zant` under [`implant/zant/plugin`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin), but it is not auto-installed or auto-activated at startup.
 
-The project currently expects payload objects under one of:
+To exercise the plugin flow explicitly:
 
-- `implant/zant/out/build/msvc-debug/payloads`
-- `implant/zant/out/build/msvc-release/payloads`
-- `implant/zant/out/build/default/payloads`
+```powershell
+plugins install implant/zant/plugin
+plugins activate zant 0.1.0
+```
 
-If those artifacts are missing, task queueing for payload-backed tasks will fail at payload resolution time.
+That copies the package into:
+
+- `plugins/packages/zant/0.1.0`
+- `plugins/active/zant`
+
+If an active plugin's artifacts are missing, task queueing for payload-backed tasks will fail at payload resolution time.
+
+The install package contains only the files required for installation and execution:
+
+- `plugin.json`
+- `manifest.json`
+- `bin/plugin.exe`
+- `artifacts/`
+
+The source used to build `bin/plugin.exe` lives separately under [`implant/zant/plugin-src`](/C:/Users/wammu/source/repos/malice/implant/zant/plugin-src).
 
 ## Current Operator Commands
 
 The command parser currently supports:
 
-- `tcpserver start`
-- `tcpserver stop`
+- `httpserver start`
+- `httpserver stop`
 - `implants list`
 - `implants info <clientid>`
+- `plugins list`
+- `plugins install <path>`
+- `plugins activate <id> [version]`
+- `plugins deactivate <id>`
+- `plugins remove <id> <version>`
+- `plugins inspect <id> [version]`
 - `task queue <clientid> <task-kind> [args..]`
 - `task result <task_id>`
 - `exit`

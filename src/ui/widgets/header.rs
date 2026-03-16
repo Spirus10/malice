@@ -69,6 +69,7 @@ pub fn render(frame: &mut Frame, area: ratatui::layout::Rect, state: &UiState) {
         Span::raw(format!("{:?}", state.mode)),
     ]);
 
-    let widget = Paragraph::new(line).block(Block::default().title("Header").borders(Borders::ALL));
+    let widget = Paragraph::new(line)
+        .block(Block::default().title("/\\/\\alice").borders(Borders::ALL));
     frame.render_widget(widget, area);
 }

@@ -1,6 +1,10 @@
 //! Central server context shared by command handlers, HTTP routes, and the UI.
 
-use std::{io::Result as IoResult, sync::Arc};
+use std::{
+    io::Result as IoResult,
+    path::Path,
+    sync::{Arc, RwLock},
+};
 
 use uuid::Uuid;
 
@@ -9,19 +13,20 @@ use super::{
     admission::{AdmissionPolicy, PacketRequestContext, RegisterHeaderPolicy},
     implants::{ImplantRecord, ImplantRegistry},
     integrations::{
-        ImplantIntegrationRegistry, TaskDefinition, UiActionDefinition, DEFAULT_RESULT_ACTION_ID,
+        ImplantIntegrationRegistry, InstalledPluginSummary, PluginInspection, PluginStore,
+        TaskDefinition, UiActionDefinition, DEFAULT_RESULT_ACTION_ID,
     },
     payloads::PayloadRepository,
     router::PacketRouter,
     tasks::{FetchTaskResponse, TaskRecord, TaskResultPayload, TaskService},
 };
 
-#[derive(Clone)]
 pub struct ServerContext {
     implants: ImplantRegistry,
     tasks: TaskService,
     payloads: PayloadRepository,
-    integrations: ImplantIntegrationRegistry,
+    integrations: RwLock<ImplantIntegrationRegistry>,
+    plugins: PluginStore,
     router: PacketRouter,
     activity: ActivityLog,
     admission: Arc<dyn AdmissionPolicy>,
@@ -32,11 +37,14 @@ impl ServerContext {
     ///
     /// @return Shared server context containing the registries, router, and task services.
     pub fn new() -> Arc<Self> {
+        let plugins = PluginStore::new("plugins");
+        let integrations = ImplantIntegrationRegistry::load(&plugins);
         Arc::new_cyclic(|weak| Self {
             implants: ImplantRegistry::new(),
             tasks: TaskService::new(),
             payloads: PayloadRepository::new(),
-            integrations: ImplantIntegrationRegistry::new(),
+            integrations: RwLock::new(integrations),
+            plugins,
             router: PacketRouter::new(weak.clone()),
             activity: ActivityLog::new(256),
             admission: Arc::new(RegisterHeaderPolicy),
@@ -130,6 +138,8 @@ impl ServerContext {
             })?;
         let integration = self
             .integrations
+            .read()
+            .expect("integration registry lock poisoned")
             .by_implant_type(&implant.identity.implant_type)?;
         let spec = integration
             .build_task(&implant, task_kind, args, &self.payloads)?
@@ -187,7 +197,11 @@ impl ServerContext {
         requested_clientid: Option<Uuid>,
         payload: super::implants::RegisterPayload,
     ) -> IoResult<ImplantRecord> {
-        let integration = self.integrations.by_implant_type(&payload.implant_type)?;
+        let integration = self
+            .integrations
+            .read()
+            .expect("integration registry lock poisoned")
+            .by_implant_type(&payload.implant_type)?;
         integration.validate_registration(&payload)?;
         self.implants
             .register(
@@ -207,7 +221,11 @@ impl ServerContext {
         let tasks = self.tasks.lease_tasks(clientid, want).await;
         let mut envelopes = Vec::with_capacity(tasks.len());
         for task in tasks {
-            let integration = self.integrations.by_id(&task.integration_id)?;
+            let integration = self
+                .integrations
+                .read()
+                .expect("integration registry lock poisoned")
+                .by_id(&task.integration_id)?;
             envelopes.push(integration.serialize_task(&task)?);
         }
 
@@ -219,7 +237,11 @@ impl ServerContext {
             self.tasks.get(&payload.task_id).await.ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "Unknown task id")
             })?;
-        let integration = self.integrations.by_id(&task.integration_id)?;
+        let integration = self
+            .integrations
+            .read()
+            .expect("integration registry lock poisoned")
+            .by_id(&task.integration_id)?;
         let (task_id, status, result) = integration.decode_result(&task, payload)?;
         self.tasks.complete_result(task_id, status, result).await
     }
@@ -230,6 +252,8 @@ impl ServerContext {
     ) -> IoResult<super::implants::TaskingMetadata> {
         let integration = self
             .integrations
+            .read()
+            .expect("integration registry lock poisoned")
             .by_implant_type(&implant.identity.implant_type)?;
         let definitions: &[TaskDefinition] = integration.task_definitions();
         Ok(super::implants::TaskingMetadata {
@@ -250,6 +274,8 @@ impl ServerContext {
     ) -> IoResult<Vec<UiActionDefinition>> {
         let integration = self
             .integrations
+            .read()
+            .expect("integration registry lock poisoned")
             .by_implant_type(&implant.identity.implant_type)?;
         let mut actions = integration.ui_actions().to_vec();
         actions.push(UiActionDefinition {
@@ -261,5 +287,58 @@ impl ServerContext {
             queue_immediately: false,
         });
         Ok(actions)
+    }
+
+    pub fn list_plugins(&self) -> IoResult<Vec<InstalledPluginSummary>> {
+        self.plugins.list_installed()
+    }
+
+    pub fn inspect_plugin(
+        &self,
+        plugin_id: &str,
+        version: Option<&str>,
+    ) -> IoResult<PluginInspection> {
+        self.plugins.inspect(plugin_id, version)
+    }
+
+    pub fn install_plugin(&self, source: &Path) -> IoResult<InstalledPluginSummary> {
+        self.plugins.install_from_dir(source)
+    }
+
+    pub fn activate_plugin(
+        &self,
+        plugin_id: &str,
+        version: Option<&str>,
+    ) -> IoResult<InstalledPluginSummary> {
+        let summary = self.plugins.activate(plugin_id, version)?;
+        self.reload_integrations()?;
+        Ok(summary)
+    }
+
+    pub fn deactivate_plugin(&self, plugin_id: &str) -> IoResult<()> {
+        self.plugins.deactivate(plugin_id)?;
+        self.reload_integrations()
+    }
+
+    pub fn remove_plugin(&self, plugin_id: &str, version: &str) -> IoResult<()> {
+        self.plugins.remove(plugin_id, version)
+    }
+
+    pub fn plugin_load_errors(&self) -> Vec<String> {
+        self.integrations
+            .read()
+            .expect("integration registry lock poisoned")
+            .load_errors()
+            .to_vec()
+    }
+
+    fn reload_integrations(&self) -> IoResult<()> {
+        let updated = ImplantIntegrationRegistry::load(&self.plugins);
+        let mut lock = self
+            .integrations
+            .write()
+            .expect("integration registry lock poisoned");
+        *lock = updated;
+        Ok(())
     }
 }

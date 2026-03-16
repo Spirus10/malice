@@ -24,4 +24,10 @@ pub enum UiAction {
     TaskMenuNext,
     TaskMenuPrevious,
     ConfirmTaskMenu,
+    ResultScrollUp,
+    ResultScrollDown,
+    ResultPageUp,
+    ResultPageDown,
+    ResultScrollTop,
+    ResultScrollBottom,
 }
