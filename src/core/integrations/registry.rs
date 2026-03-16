@@ -1,39 +1,102 @@
 use std::{
     collections::HashMap,
     io::{Error, ErrorKind, Result},
-    path::PathBuf,
     sync::Arc,
 };
 
-use super::{types::ImplantIntegration, zant::ZantIntegration};
+use super::{
+    loaded::WorkerPluginIntegration, package::PluginStore, types::ImplantIntegration,
+    worker::WorkerPluginClient,
+};
 
 #[derive(Clone)]
 pub struct ImplantIntegrationRegistry {
     by_id: Arc<HashMap<String, Arc<dyn ImplantIntegration>>>,
     by_implant_type: Arc<HashMap<String, Arc<dyn ImplantIntegration>>>,
+    load_errors: Arc<Vec<String>>,
 }
 
 impl ImplantIntegrationRegistry {
-    pub fn new() -> Self {
-        let integrations: Vec<Arc<dyn ImplantIntegration>> = vec![Arc::new(
-            ZantIntegration::load(
-                &PathBuf::from("integrations")
-                    .join("zant")
-                    .join("manifest.json"),
-            )
-            .unwrap_or_else(|err| panic!("failed to load zant integration manifest: {err}")),
-        )];
+    pub fn load(store: &PluginStore) -> Self {
         let mut by_id = HashMap::new();
         let mut by_implant_type = HashMap::new();
+        let mut load_errors = Vec::new();
 
-        for integration in integrations {
-            by_implant_type.insert(integration.implant_type().to_string(), integration.clone());
-            by_id.insert(integration.id().to_string(), integration);
+        match store.active_plugin_roots() {
+            Ok(package_roots) => {
+                for package_root in package_roots {
+                    let descriptor = match store.load_descriptor(&package_root) {
+                        Ok(descriptor) => descriptor,
+                        Err(err) => {
+                            load_errors.push(format!(
+                                "failed to read plugin package at '{}': {err}",
+                                package_root.display()
+                            ));
+                            continue;
+                        }
+                    };
+                    let manifest = match descriptor.load_manifest(&package_root) {
+                        Ok(manifest) => manifest,
+                        Err(err) => {
+                            load_errors.push(format!(
+                                "failed to load manifest for plugin '{}': {err}",
+                                descriptor.plugin_id
+                            ));
+                            continue;
+                        }
+                    };
+                    let worker = match WorkerPluginClient::start(&package_root, &descriptor) {
+                        Ok(worker) => worker,
+                        Err(err) => {
+                            load_errors.push(format!(
+                                "failed to start plugin '{}': {err}",
+                                descriptor.plugin_id
+                            ));
+                            continue;
+                        }
+                    };
+                    let integration: Arc<dyn ImplantIntegration> =
+                        match WorkerPluginIntegration::load(&package_root, manifest.clone(), worker)
+                        {
+                            Ok(integration) => Arc::new(integration),
+                            Err(err) => {
+                                load_errors.push(format!(
+                                    "failed to load plugin '{}': {err}",
+                                    descriptor.plugin_id
+                                ));
+                                continue;
+                            }
+                        };
+
+                    if by_id.contains_key(integration.id()) {
+                        load_errors.push(format!(
+                            "duplicate active integration id '{}'",
+                            integration.id()
+                        ));
+                        continue;
+                    }
+
+                    if by_implant_type.contains_key(integration.implant_type()) {
+                        load_errors.push(format!(
+                            "duplicate active implant type '{}' from plugin '{}'",
+                            integration.implant_type(),
+                            manifest.id
+                        ));
+                        continue;
+                    }
+
+                    by_implant_type
+                        .insert(integration.implant_type().to_string(), integration.clone());
+                    by_id.insert(integration.id().to_string(), integration);
+                }
+            }
+            Err(err) => load_errors.push(format!("failed to enumerate active plugins: {err}")),
         }
 
         Self {
             by_id: Arc::new(by_id),
             by_implant_type: Arc::new(by_implant_type),
+            load_errors: Arc::new(load_errors),
         }
     }
 
@@ -54,5 +117,9 @@ impl ImplantIntegrationRegistry {
                     format!("No integration registered for implant type '{implant_type}'"),
                 )
             })
+    }
+
+    pub fn load_errors(&self) -> &[String] {
+        self.load_errors.as_ref()
     }
 }

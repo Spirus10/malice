@@ -30,7 +30,6 @@ pub trait ImplantIntegration: Send + Sync {
     fn id(&self) -> &str;
     fn implant_type(&self) -> &str;
     fn family(&self) -> ImplantFamily;
-    fn supported_protocol_versions(&self) -> &[u32];
     fn capabilities(&self) -> &[ImplantCapability];
     fn task_definitions(&self) -> &[TaskDefinition];
     fn ui_actions(&self) -> &[UiActionDefinition];

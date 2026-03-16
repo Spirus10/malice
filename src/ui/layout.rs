@@ -17,9 +17,9 @@ pub fn split(area: Rect, command_context: CommandContextMode) -> ScreenLayout {
     let vertical = match command_context {
         CommandContextMode::Teamserver => Layout::vertical([
             Constraint::Length(3),
-            Constraint::Min(12),
-            Constraint::Length(10),
-            Constraint::Length(3),
+            Constraint::Min(10),
+            Constraint::Length(8),
+            Constraint::Length(7),
             Constraint::Length(3),
         ])
         .split(area),

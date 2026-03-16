@@ -4,15 +4,23 @@ use std::{
     path::Path,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::core::{implants::ImplantCapability, integrations::types::UiActionDefinition};
 
 use super::types::TaskDefinition;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IntegrationManifest {
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    #[serde(default = "default_plugin_api_version")]
+    pub plugin_api_version: u32,
     pub id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub description: String,
     pub implant_type: String,
     pub family: String,
     pub protocol_versions: Vec<u32>,
@@ -22,7 +30,7 @@ pub struct IntegrationManifest {
     pub ui_actions: Vec<ManifestUiActionDefinition>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ManifestTaskDefinition {
     pub kind: String,
     pub usage: String,
@@ -31,7 +39,7 @@ pub struct ManifestTaskDefinition {
     pub arg_mode: ManifestArgMode,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ManifestArgMode {
     None,
@@ -43,7 +51,7 @@ pub enum ManifestArgMode {
     KillPid,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ManifestUiActionDefinition {
     pub id: String,
     pub label: String,
@@ -108,4 +116,12 @@ impl IntegrationManifest {
             })
             .collect()
     }
+}
+
+fn default_schema_version() -> u32 {
+    1
+}
+
+fn default_plugin_api_version() -> u32 {
+    1
 }

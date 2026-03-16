@@ -4,6 +4,7 @@
 pub enum ParsedCommand {
     Server(ServerCommand),
     Implants(ImplantCommand),
+    Plugins(PluginCommand),
     Tasks(TaskCommand),
     Exit,
 }
@@ -17,6 +18,29 @@ pub enum ServerCommand {
 pub enum ImplantCommand {
     List,
     Info { clientid: String },
+}
+
+#[derive(Debug, Clone)]
+pub enum PluginCommand {
+    List,
+    Install {
+        source: String,
+    },
+    Activate {
+        plugin_id: String,
+        version: Option<String>,
+    },
+    Deactivate {
+        plugin_id: String,
+    },
+    Remove {
+        plugin_id: String,
+        version: String,
+    },
+    Inspect {
+        plugin_id: String,
+        version: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +114,55 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
             }
             _ => Err("Usage: implants list | implants info <clientid>".to_string()),
         },
+        "plugins" => match args.as_slice() {
+            [subcommand] if subcommand == "list" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::List))
+            }
+            [subcommand, source] if subcommand == "install" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Install {
+                    source: source.clone(),
+                }))
+            }
+            [subcommand, plugin_id] if subcommand == "activate" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Activate {
+                    plugin_id: plugin_id.clone(),
+                    version: None,
+                }))
+            }
+            [subcommand, plugin_id, version] if subcommand == "activate" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Activate {
+                    plugin_id: plugin_id.clone(),
+                    version: Some(version.clone()),
+                }))
+            }
+            [subcommand, plugin_id] if subcommand == "deactivate" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Deactivate {
+                    plugin_id: plugin_id.clone(),
+                }))
+            }
+            [subcommand, plugin_id, version] if subcommand == "remove" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Remove {
+                    plugin_id: plugin_id.clone(),
+                    version: version.clone(),
+                }))
+            }
+            [subcommand, plugin_id] if subcommand == "inspect" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Inspect {
+                    plugin_id: plugin_id.clone(),
+                    version: None,
+                }))
+            }
+            [subcommand, plugin_id, version] if subcommand == "inspect" => {
+                Ok(ParsedCommand::Plugins(PluginCommand::Inspect {
+                    plugin_id: plugin_id.clone(),
+                    version: Some(version.clone()),
+                }))
+            }
+            _ => Err(
+                "Usage: plugins list | plugins install <path> | plugins activate <id> [version] | plugins deactivate <id> | plugins remove <id> <version> | plugins inspect <id> [version]"
+                    .to_string(),
+            ),
+        },
         "task" => match args.as_slice() {
             [subcommand, clientid, task_kind, rest @ ..] if subcommand == "queue" => {
                 Ok(ParsedCommand::Tasks(TaskCommand::Queue {
@@ -115,7 +188,7 @@ pub fn parse_command(input: &str) -> Result<ParsedCommand, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_command, ParsedCommand, TaskCommand};
+    use super::{parse_command, ParsedCommand, PluginCommand, TaskCommand};
 
     #[test]
     fn parses_quoted_task_arguments() {
@@ -149,6 +222,19 @@ mod tests {
         match parsed {
             ParsedCommand::Tasks(TaskCommand::Queue { args, .. }) => {
                 assert_eq!(args, vec![r#"C:\Users\wammu\Documents"#]);
+            }
+            _ => panic!("unexpected command shape"),
+        }
+    }
+
+    #[test]
+    fn parses_plugin_activate_with_optional_version() {
+        let parsed = parse_command("plugins activate zant 0.1.0").unwrap();
+
+        match parsed {
+            ParsedCommand::Plugins(PluginCommand::Activate { plugin_id, version }) => {
+                assert_eq!(plugin_id, "zant");
+                assert_eq!(version.as_deref(), Some("0.1.0"));
             }
             _ => panic!("unexpected command shape"),
         }

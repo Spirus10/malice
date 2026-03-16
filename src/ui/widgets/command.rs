@@ -37,7 +37,7 @@ fn render_teamserver(state: &UiState) -> (String, Vec<Line<'static>>) {
     let mut lines = vec![prompt];
     if state.teamserver_output.is_empty() {
         lines.push(Line::from(
-            "global commands: httpserver, implants, task queue, task result",
+            "global commands: httpserver, implants, plugins, task queue, task result",
         ));
         let advertised = if state.data.tasking_metadata.command_names.is_empty() {
             "tasks depend on the selected implant".to_string()
@@ -55,11 +55,15 @@ fn render_teamserver(state: &UiState) -> (String, Vec<Line<'static>>) {
             "press `t` for task templates, `:` for raw teamserver commands",
         ));
     } else {
+        lines.push(Line::styled(
+            "last command output:",
+            Style::default().fg(Color::Cyan),
+        ));
         lines.extend(
             state
                 .teamserver_output
                 .iter()
-                .take(2)
+                .take(5)
                 .cloned()
                 .map(Line::from),
         );

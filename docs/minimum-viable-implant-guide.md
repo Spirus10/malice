@@ -5,9 +5,9 @@ This guide walks through the smallest useful implant you can build for the curre
 It is written against the current codebase, where:
 
 - the teamserver owns core orchestration
-- implant-family specifics live behind a server-side integration
-- integration metadata is declared in a manifest
-- runtime execution logic remains implemented by the implant itself
+- implant-family specifics are delivered as installable plugin packages
+- integration metadata is declared in a package-local manifest
+- runtime execution logic is still host-adapter-backed today, with package install and activation already separated from the core binary
 
 Use this document when you want to:
 
@@ -81,7 +81,8 @@ Relevant files:
 
 - [src/core/integrations/types.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
 - [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
-- [src/core/integrations/zant.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/zant.rs)
+- [src/core/integrations/loaded.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/loaded.rs)
+- [src/core/integrations/worker.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/worker.rs)
 
 ### Integration manifest
 
@@ -89,7 +90,7 @@ Each integration can now declare its metadata in a manifest.
 
 Current example:
 
-- [integrations/zant/manifest.json](/C:/Users/wammu/source/repos/malice/integrations/zant/manifest.json)
+- [implant/zant/plugin/manifest.json](/C:/Users/wammu/source/repos/malice/implant/zant/plugin/manifest.json)
 
 That manifest currently holds:
 
@@ -131,9 +132,9 @@ For the current `zant` runtime, see:
 If you are creating a new implant family from scratch, the smallest useful path is:
 
 1. create a runtime that can register, heartbeat, fetch, and post results
-2. create a server-side integration module for that runtime
+2. create a plugin package for that runtime
 3. create a manifest for that integration
-4. register the integration in the Rust registry
+4. install and activate the package through the teamserver
 5. test with one fake or real task
 
 If you want the fastest first success, make the first task a no-op or echo-style task:
@@ -394,16 +395,37 @@ If your implant is brand new, you need a server-side integration in addition to 
 
 ### Step 1: Add a manifest
 
-Create a new manifest directory such as:
+Create a plugin package directory such as:
 
 ```text
-integrations/stub/manifest.json
+implant/stub/plugin/
+  plugin.json
+  manifest.json
+  artifacts/
 ```
 
 A minimal example:
 
+`plugin.json`
+
 ```json
 {
+  "package_id": "malice.integration.stub",
+  "plugin_id": "stub",
+  "version": "0.1.0",
+  "plugin_api_version": 1,
+  "manifest_path": "manifest.json",
+  "min_core_version": "0.1.0",
+  "artifact_roots": ["artifacts"]
+}
+```
+
+`manifest.json`
+
+```json
+{
+  "schema_version": 2,
+  "plugin_api_version": 1,
   "id": "stub",
   "implant_type": "stub_loader",
   "family": "stub_loader",
@@ -539,10 +561,6 @@ impl ImplantIntegration for StubIntegration {
         ImplantFamily::Unknown(self.manifest.family.clone())
     }
 
-    fn supported_protocol_versions(&self) -> &[u32] {
-        &self.manifest.protocol_versions
-    }
-
     fn capabilities(&self) -> &[ImplantCapability] {
         &self.capabilities
     }
@@ -563,7 +581,7 @@ impl ImplantIntegration for StubIntegration {
             ));
         }
 
-        if self.supported_protocol_versions().contains(&payload.protocol_version) {
+        if self.manifest.protocol_versions.contains(&payload.protocol_version) {
             Ok(())
         } else {
             Err(Error::new(
@@ -672,7 +690,18 @@ Add the integration to:
 
 - [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
 
-That is the only core registry change you should need for a new statically linked integration.
+That remains the temporary bridge for this branch. The install and activation flow is already package-based, but new runtime behavior still needs a host adapter until the dynamic plugin ABI is implemented.
+
+### Step 4: Install and activate the package
+
+With the package laid out under the implant repo, load it through the operator interface:
+
+```text
+plugins install implant/stub/plugin
+plugins activate stub 0.1.0
+```
+
+The teamserver copies the package into its local plugin store and reloads the active integration registry from there.
 
 ## A Very Small Runtime Loop
 
@@ -859,12 +888,13 @@ Future result shapes could include:
 1. Build a runtime that only registers and heartbeats.
 2. Add fetch-task polling.
 3. Add one fake task executor.
-4. Add the server-side integration manifest.
-5. Add the server-side integration Rust module.
-6. Register the integration.
-7. Validate task round-trip.
-8. Replace fake execution with one real executor.
-9. Expand task catalog only after the lifecycle is stable.
+4. Add the plugin package under the implant repo.
+5. Add the server-side integration manifest and package metadata.
+6. Add the server-side host adapter.
+7. Install and activate the package.
+8. Validate task round-trip.
+9. Replace fake execution with one real executor.
+10. Expand task catalog only after the lifecycle is stable.
 
 ## Reference Files
 
@@ -875,7 +905,7 @@ Useful starting points in this repo:
 - [docs/protocol/v1/core-messages.md](/C:/Users/wammu/source/repos/malice/docs/protocol/v1/core-messages.md)
 - [src/core/integrations/types.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/types.rs)
 - [src/core/integrations/registry.rs](/C:/Users/wammu/source/repos/malice/src/core/integrations/registry.rs)
-- [integrations/zant/manifest.json](/C:/Users/wammu/source/repos/malice/integrations/zant/manifest.json)
+- [implant/zant/plugin/manifest.json](/C:/Users/wammu/source/repos/malice/implant/zant/plugin/manifest.json)
 - [implant/zant/runtime/protocol.h](/C:/Users/wammu/source/repos/malice/implant/zant/runtime/protocol.h)
 
 ## Summary
