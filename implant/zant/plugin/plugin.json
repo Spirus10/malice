@@ -1,0 +1,14 @@
+{
+  "package_id": "malice.integration.zant",
+  "plugin_id": "zant",
+  "version": "0.1.0",
+  "plugin_api_version": 1,
+  "runtime": {
+    "type": "stdio",
+    "command": ["bin/plugin.exe"]
+  },
+  "manifest_path": "manifest.json",
+  "min_core_version": "0.1.0",
+  "platforms": ["windows-x86_64"],
+  "artifact_roots": ["artifacts"]
+}
