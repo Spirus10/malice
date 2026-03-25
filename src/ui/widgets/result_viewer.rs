@@ -1,7 +1,7 @@
 //! Renders the modal viewer for the latest task result text.
 
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     core::tasks::{TaskResultData, TaskStatus},
-    ui::state::UiState,
+    ui::{layout::centered_rect, state::UiState},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, state: &UiState) {
@@ -60,19 +60,4 @@ pub fn render(frame: &mut Frame, area: Rect, state: &UiState) {
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, popup);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
 }

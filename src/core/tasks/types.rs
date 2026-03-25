@@ -33,7 +33,6 @@ pub struct TaskResultPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum TaskStatus {
     Queued,
     Leased,
@@ -41,6 +40,19 @@ pub enum TaskStatus {
     TimedOut,
     Completed,
     Failed,
+}
+
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TaskStatus::Queued => write!(f, "queued"),
+            TaskStatus::Leased => write!(f, "leased"),
+            TaskStatus::Completed => write!(f, "completed"),
+            TaskStatus::Acknowledged => write!(f, "acknowledged"),
+            TaskStatus::TimedOut => write!(f, "timed out"),
+            TaskStatus::Failed => write!(f, "failed"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

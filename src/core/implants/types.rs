@@ -11,6 +11,7 @@ impl ImplantCapability {
         Self(value.into())
     }
 
+    #[deprecated(note = "use ImplantCapability::new instead")]
     pub fn from_key(value: &str) -> Self {
         Self::new(value)
     }

@@ -1,7 +1,7 @@
 //! Command dispatcher and shared helper types for operator commands.
 
 use std::path::Path;
-use std::{collections::HashMap, error::Error, fmt, future::Future, pin::Pin, process, sync::Arc};
+use std::{collections::HashMap, error::Error, fmt, future::Future, pin::Pin, sync::Arc};
 
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -18,11 +18,17 @@ pub struct CommandError {
     details: String,
 }
 
+pub const EXIT_SENTINEL: &str = "__quit__";
+
 impl CommandError {
     pub fn new(msg: impl Into<String>) -> CommandError {
         CommandError {
             details: msg.into(),
         }
+    }
+
+    pub fn is_exit(&self) -> bool {
+        self.details == EXIT_SENTINEL
     }
 }
 
@@ -229,7 +235,7 @@ impl CommandContext {
     }
 }
 
-type CommandFuture = Pin<Box<dyn Future<Output = Result<CommandOutput, CommandError>> + Send>>;
+pub type CommandFuture = Pin<Box<dyn Future<Output = Result<CommandOutput, CommandError>> + Send>>;
 pub type CommandExecutor = fn(Arc<CommandContext>, ParsedCommand) -> CommandFuture;
 
 pub struct CommandHandler {
@@ -265,7 +271,7 @@ impl CommandHandler {
     /// @return Renderable command output or a command error if execution fails.
     pub async fn handle(&self, command: ParsedCommand) -> Result<CommandOutput, CommandError> {
         match command {
-            ParsedCommand::Exit => process::exit(0),
+            ParsedCommand::Exit => Err(CommandError::new(EXIT_SENTINEL)),
             ParsedCommand::Server(_) => self.execute("server", command).await,
             ParsedCommand::Implants(_) => self.execute("implants", command).await,
             ParsedCommand::Plugins(_) => self.execute("plugins", command).await,

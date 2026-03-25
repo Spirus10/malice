@@ -241,6 +241,9 @@ impl UiState {
     pub fn push_teamserver_history(&mut self, value: String) {
         if !value.is_empty() {
             self.teamserver_history.push(value);
+            if self.teamserver_history.len() > 100 {
+                self.teamserver_history.drain(..self.teamserver_history.len() - 100);
+            }
         }
         self.teamserver_history_index = None;
     }
@@ -248,6 +251,9 @@ impl UiState {
     pub fn push_agent_history(&mut self, value: String) {
         if !value.is_empty() {
             self.agent_history.push(value);
+            if self.agent_history.len() > 100 {
+                self.agent_history.drain(..self.agent_history.len() - 100);
+            }
         }
         self.agent_history_index = None;
     }

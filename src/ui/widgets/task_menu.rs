@@ -1,14 +1,14 @@
 //! Renders the quick task selection overlay.
 
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Clear, List, ListItem, ListState},
     Frame,
 };
 
-use crate::ui::state::UiState;
+use crate::ui::{layout::centered_rect, state::UiState};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &UiState) {
     let popup = centered_rect(62, 50, area);
@@ -38,19 +38,4 @@ pub fn render(frame: &mut Frame, area: Rect, state: &UiState) {
     let mut list_state = ListState::default();
     list_state.select(Some(selected_index));
     frame.render_stateful_widget(list, popup, &mut list_state);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
 }

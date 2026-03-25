@@ -1,8 +1,8 @@
 //! Registers the concrete command executors available to the operator console.
 
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
-use super::dispatcher::CommandExecutor;
+use super::dispatcher::{CommandExecutor, CommandFuture};
 use crate::core::command::{
     dispatcher::{
         good, info, parse_uuid, show_implant_info, show_implant_list, show_task_result,
@@ -19,8 +19,6 @@ pub fn registry() -> HashMap<&'static str, CommandExecutor> {
     handlers.insert("tasks", execute_tasks as CommandExecutor);
     handlers
 }
-
-type CommandFuture = Pin<Box<dyn Future<Output = Result<CommandOutput, CommandError>> + Send>>;
 
 fn execute_server(context: Arc<CommandContext>, command: ParsedCommand) -> CommandFuture {
     Box::pin(async move {

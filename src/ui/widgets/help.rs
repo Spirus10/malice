@@ -1,11 +1,13 @@
 //! Renders the keyboard shortcut help overlay.
 
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Alignment, Rect},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
+
+use crate::ui::layout::centered_rect;
 
 pub fn render(frame: &mut Frame, area: Rect) {
     let popup = centered_rect(60, 50, area);
@@ -43,19 +45,4 @@ pub fn render(frame: &mut Frame, area: Rect) {
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: true });
     frame.render_widget(widget, popup);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
 }
