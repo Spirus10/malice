@@ -274,6 +274,10 @@ impl TuiController {
         }
     }
 
+    /// Toggles between teamserver and agent command contexts.
+    ///
+    /// @param state Mutable UI state to update.
+    /// @return I/O result describing whether the context switch succeeded.
     async fn toggle_command_context(&self, state: &mut UiState) -> Result<()> {
         match state.command_context {
             CommandContextMode::Teamserver => {
@@ -300,6 +304,11 @@ impl TuiController {
         }
     }
 
+    /// Moves the teamserver command-history cursor and updates the input buffer.
+    ///
+    /// @param state Mutable UI state containing the history buffer.
+    /// @param delta Signed offset applied to the current history cursor.
+    /// @return None.
     fn move_teamserver_history(&self, state: &mut UiState, delta: isize) {
         if state.teamserver_history.is_empty() {
             return;
@@ -317,6 +326,11 @@ impl TuiController {
         state.teamserver_input = state.teamserver_history[next].clone();
     }
 
+    /// Moves the agent command-history cursor and updates the input buffer.
+    ///
+    /// @param state Mutable UI state containing the history buffer.
+    /// @param delta Signed offset applied to the current history cursor.
+    /// @return None.
     fn move_agent_history(&self, state: &mut UiState, delta: isize) {
         if state.agent_history.is_empty() {
             return;
@@ -334,6 +348,10 @@ impl TuiController {
         state.agent_input = state.agent_history[next].clone();
     }
 
+    /// Executes the currently selected task-menu action.
+    ///
+    /// @param state Mutable UI state containing the selected action and bound agent.
+    /// @return I/O result describing whether the task action completed successfully.
     async fn confirm_task_menu(&self, state: &mut UiState) -> Result<()> {
         let Some(action) = state
             .data
@@ -398,6 +416,10 @@ impl TuiController {
         }
     }
 
+    /// Parses and executes the current teamserver command buffer.
+    ///
+    /// @param state Mutable UI state containing the teamserver input and output buffers.
+    /// @return I/O result describing whether command execution succeeded.
     async fn submit_teamserver_command(&self, state: &mut UiState) -> Result<()> {
         let input = state.teamserver_input.trim().to_string();
         if input.is_empty() {
@@ -422,6 +444,10 @@ impl TuiController {
         self.refresh(state).await
     }
 
+    /// Parses and executes the current agent command buffer.
+    ///
+    /// @param state Mutable UI state containing the agent input and output buffers.
+    /// @return I/O result describing whether command execution or queueing succeeded.
     async fn submit_agent_command(&self, state: &mut UiState) -> Result<()> {
         let input = state.agent_input.trim().to_string();
         if input.is_empty() {
@@ -494,6 +520,11 @@ impl TuiController {
         }
     }
 
+    /// Resolves operator aliases like `selected` or `active` inside parsed commands.
+    ///
+    /// @param command Parsed command that may contain aliases.
+    /// @param state Current UI state used to resolve implant context.
+    /// @return Parsed command with aliases replaced by concrete identifiers.
     fn resolve_aliases(&self, command: ParsedCommand, state: &UiState) -> Result<ParsedCommand> {
         match command {
             ParsedCommand::Tasks(TaskCommand::Queue {
@@ -514,6 +545,11 @@ impl TuiController {
         }
     }
 
+    /// Resolves one implant target token into a concrete client identifier.
+    ///
+    /// @param token Target token supplied by the operator.
+    /// @param state Current UI state used to resolve aliases.
+    /// @return Concrete client identifier string.
     fn resolve_target(&self, token: &str, state: &UiState) -> Result<String> {
         if token != "active" && token != "selected" {
             return Ok(token.to_string());
@@ -525,12 +561,20 @@ impl TuiController {
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "No active implant selected"))
     }
 
+    /// Returns the implant currently bound to the agent command context.
+    ///
+    /// @param state UI state containing the bound agent context.
+    /// @return Bound implant record reference.
     fn bound_agent_record<'a>(&self, state: &'a UiState) -> Result<&'a ImplantRecord> {
         state
             .bound_agent()
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "No bound implant selected"))
     }
 
+    /// Builds the help lines shown for agent command mode.
+    ///
+    /// @param state Current UI state containing task metadata for the bound implant.
+    /// @return Help lines describing supported agent commands.
     fn agent_help_lines(&self, state: &UiState) -> Vec<String> {
         let mut lines = vec!["supported agent commands:".to_string()];
         if state.bound_agent().is_none() {
@@ -552,6 +596,11 @@ impl TuiController {
         lines
     }
 
+    /// Inserts a task command template into the teamserver input buffer.
+    ///
+    /// @param state Mutable UI state to update.
+    /// @param template Command template text to insert.
+    /// @return None.
     fn insert_task_template(&self, state: &mut UiState, template: &str) {
         state.teamserver_input = template.to_string();
         state.enter_teamserver_context();

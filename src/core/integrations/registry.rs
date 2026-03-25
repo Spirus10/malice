@@ -1,3 +1,18 @@
+//! Runtime registry of active implant integrations.
+//!
+//! Load pipeline:
+//!
+//!   active plugin roots
+//!      -> descriptor
+//!      -> manifest
+//!      -> worker process
+//!      -> WorkerPluginIntegration
+//!      -> index by integration id
+//!      -> index by implant type
+//!
+//! Failures are accumulated into `load_errors` so one broken plugin does not
+//! prevent the rest of the active set from loading.
+
 use std::{
     collections::HashMap,
     io::{Error, ErrorKind, Result},
@@ -17,6 +32,10 @@ pub struct ImplantIntegrationRegistry {
 }
 
 impl ImplantIntegrationRegistry {
+    /// Loads every active plugin into a runtime integration registry.
+    ///
+    /// Duplicate integration ids or implant types are rejected at registry
+    /// build time because dispatch later assumes a one-to-one mapping.
     pub fn load(store: &PluginStore) -> Self {
         let mut by_id = HashMap::new();
         let mut by_implant_type = HashMap::new();
@@ -100,6 +119,7 @@ impl ImplantIntegrationRegistry {
         }
     }
 
+    /// Resolves an integration by its unique plugin/integration id.
     pub fn by_id(&self, id: &str) -> Result<Arc<dyn ImplantIntegration>> {
         self.by_id
             .get(id)
@@ -107,6 +127,7 @@ impl ImplantIntegrationRegistry {
             .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("Unknown integration '{id}'")))
     }
 
+    /// Resolves the integration responsible for a specific implant type.
     pub fn by_implant_type(&self, implant_type: &str) -> Result<Arc<dyn ImplantIntegration>> {
         self.by_implant_type
             .get(implant_type)
@@ -119,6 +140,7 @@ impl ImplantIntegrationRegistry {
             })
     }
 
+    /// Returns non-fatal plugin load errors captured during registry construction.
     pub fn load_errors(&self) -> &[String] {
         self.load_errors.as_ref()
     }

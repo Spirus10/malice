@@ -17,6 +17,15 @@ use crate::core::{
 
 /// Handles a task-poll packet and leases queued work to the implant.
 ///
+/// Flow:
+///
+///   packet
+///      -> parse FetchTaskRequest
+///      -> parse clientid from envelope
+///      -> lease queued tasks
+///      -> mark first leased task as active
+///      -> reply with serialized task envelopes
+///
 /// @param context Shared application state used to lease tasks.
 /// @param packet Parsed packet envelope containing the fetch request.
 /// @return Future that resolves to the packet reply sent back to the implant.

@@ -29,6 +29,9 @@ pub struct ActivityLog {
 
 impl ActivityLog {
     /// Creates an activity log that retains up to `capacity` events.
+    ///
+    /// @param capacity Maximum number of activity events retained in memory.
+    /// @return Activity log backed by a bounded in-memory queue.
     pub fn new(capacity: usize) -> Self {
         Self {
             events: Arc::new(Mutex::new(VecDeque::with_capacity(capacity))),
@@ -36,6 +39,13 @@ impl ActivityLog {
         }
     }
 
+    /// Pushes a new activity event onto the log and trims old entries.
+    ///
+    /// @param severity Severity assigned to the recorded event.
+    /// @param message Human-readable event message.
+    /// @param clientid Optional implant identifier associated with the event.
+    /// @param task_id Optional task identifier associated with the event.
+    /// @return Future that resolves after the event has been stored.
     pub async fn push(
         &self,
         severity: ActivitySeverity,
@@ -57,6 +67,10 @@ impl ActivityLog {
         }
     }
 
+    /// Returns the newest activity events across the full log.
+    ///
+    /// @param limit Maximum number of events to return.
+    /// @return Activity events ordered from newest to oldest.
     pub async fn recent(&self, limit: usize) -> Vec<ActivityEvent> {
         self.events
             .lock()
@@ -67,6 +81,11 @@ impl ActivityLog {
             .collect()
     }
 
+    /// Returns the newest activity events for one implant.
+    ///
+    /// @param clientid Implant identifier used to filter events.
+    /// @param limit Maximum number of events to return.
+    /// @return Filtered activity events ordered from newest to oldest.
     pub async fn recent_for_implant(&self, clientid: &Uuid, limit: usize) -> Vec<ActivityEvent> {
         self.events
             .lock()

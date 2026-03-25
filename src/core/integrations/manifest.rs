@@ -1,3 +1,16 @@
+//! Manifest types loaded from a plugin package's integration manifest file.
+//!
+//! Relationship to the rest of the integration system:
+//!
+//!   manifest.json
+//!      -> IntegrationManifest
+//!      -> task/ui metadata used by the core
+//!      -> runtime handshake validation in `loaded.rs`
+//!
+//! The manifest is the declarative half of a plugin package; `plugin.json`
+//! describes packaging/runtime, while this file describes implant-facing
+//! capabilities, tasks, and UI actions.
+
 use std::{
     fs,
     io::{Error, ErrorKind, Result},
@@ -64,6 +77,7 @@ pub struct ManifestUiActionDefinition {
 }
 
 impl IntegrationManifest {
+    /// Loads and parses an integration manifest from disk.
     pub fn load(path: &Path) -> Result<Self> {
         let contents = fs::read_to_string(path).map_err(|err| {
             Error::new(
@@ -85,6 +99,7 @@ impl IntegrationManifest {
         })
     }
 
+    /// Converts manifest capability keys into internal capability enums.
     pub fn capabilities(&self) -> Result<Vec<ImplantCapability>> {
         Ok(self
             .capabilities
@@ -93,6 +108,7 @@ impl IntegrationManifest {
             .collect())
     }
 
+    /// Projects manifest task metadata into the subset used by the UI/core.
     pub fn task_definitions(&self) -> Vec<TaskDefinition> {
         self.tasks
             .iter()
@@ -103,6 +119,7 @@ impl IntegrationManifest {
             .collect()
     }
 
+    /// Projects manifest UI actions into the runtime action model.
     pub fn ui_actions(&self) -> Vec<UiActionDefinition> {
         self.ui_actions
             .iter()

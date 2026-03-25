@@ -13,6 +13,15 @@ use crate::core::{
 
 /// Handles a task result packet and records the completed task outcome.
 ///
+/// Flow:
+///
+///   packet
+///      -> parse TaskResultPayload
+///      -> decode through integration
+///      -> clear implant active task
+///      -> record completion activity
+///      -> reply with acknowledged task id
+///
 /// @param context Shared application state used to store task results.
 /// @param packet Parsed packet envelope containing the task result payload.
 /// @return Future that resolves to the packet reply sent back to the implant.

@@ -192,6 +192,11 @@ impl ServerContext {
         self.tasks.recent_for_implant(clientid, limit).await
     }
 
+    /// Registers or updates an implant record from a registration payload.
+    ///
+    /// @param requested_clientid Optional client identifier requested by the implant.
+    /// @param payload Registration payload received from the implant.
+    /// @return Registered implant record or an I/O error if validation fails.
     pub async fn register_implant(
         &self,
         requested_clientid: Option<Uuid>,
@@ -213,6 +218,11 @@ impl ServerContext {
             .await
     }
 
+    /// Leases queued work for a specific implant and serializes task envelopes.
+    ///
+    /// @param clientid Implant identifier requesting tasks.
+    /// @param want Maximum number of tasks to lease.
+    /// @return Task response containing serialized envelopes or an I/O error.
     pub async fn fetch_tasks_for_implant(
         &self,
         clientid: Uuid,
@@ -232,6 +242,10 @@ impl ServerContext {
         Ok(FetchTaskResponse { tasks: envelopes })
     }
 
+    /// Records a task result payload and decodes it through the owning integration.
+    ///
+    /// @param payload Task result payload received from the implant.
+    /// @return Updated task record or an I/O error if the task cannot be resolved.
     pub async fn record_task_result(&self, payload: TaskResultPayload) -> IoResult<TaskRecord> {
         let task =
             self.tasks.get(&payload.task_id).await.ok_or_else(|| {
@@ -268,6 +282,10 @@ impl ServerContext {
         })
     }
 
+    /// Returns UI actions exposed by the implant integration plus built-in helpers.
+    ///
+    /// @param implant Implant record whose integration should be inspected.
+    /// @return UI action definitions or an I/O error if the integration is unavailable.
     pub fn ui_actions_for_implant(
         &self,
         implant: &ImplantRecord,

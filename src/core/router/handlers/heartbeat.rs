@@ -17,6 +17,15 @@ use crate::core::{
 
 /// Handles an implant heartbeat packet.
 ///
+/// Flow:
+///
+///   packet
+///      -> parse HeartbeatPayload
+///      -> parse clientid from envelope
+///      -> update implant liveness/state
+///      -> record heartbeat activity
+///      -> reply ok
+///
 /// @param context Shared application state used to update implant liveness.
 /// @param packet Parsed packet envelope containing the heartbeat payload.
 /// @return Future that resolves to the packet reply sent back to the implant.

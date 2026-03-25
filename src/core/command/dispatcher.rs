@@ -293,10 +293,6 @@ impl CommandHandler {
     }
 }
 
-/// Parses a UUID argument supplied to the command layer.
-///
-/// @param input Raw UUID string from a command argument.
-/// @return Parsed UUID or a command error if the input is invalid.
 pub fn parse_uuid(input: &str) -> Result<Uuid, CommandError> {
     input
         .parse::<Uuid>()

@@ -1,3 +1,18 @@
+//! Runtime-backed implementation of `ImplantIntegration`.
+//!
+//! Translation layers:
+//!
+//!   package manifest + plugin worker
+//!      -> WorkerPluginIntegration
+//!      -> validate registration
+//!      -> build queued task state
+//!      -> serialize leased tasks
+//!      -> decode task results
+//!
+//! This module is the bridge between stable core types (`TaskRecord`,
+//! `RegisterPayload`, `TaskEnvelope`) and the plugin RPC protocol defined in
+//! `plugin_api.rs`.
+
 use std::{
     io::{Error, ErrorKind, Result},
     path::{Path, PathBuf},
@@ -37,6 +52,16 @@ pub struct WorkerPluginIntegration {
 }
 
 impl WorkerPluginIntegration {
+    /// Loads a runtime-backed integration from a validated package manifest.
+    ///
+    /// Startup sequence:
+    ///
+    ///   package manifest
+    ///      + worker process
+    ///      -> runtime handshake (`get_manifest`)
+    ///      -> API version check
+    ///      -> manifest consistency check
+    ///      -> cached capabilities / task defs / UI actions
     pub fn load(
         package_root: &Path,
         manifest: IntegrationManifest,
@@ -249,6 +274,7 @@ fn validate_runtime_manifest(
     Ok(())
 }
 
+/// Maps the manifest family key into the internal implant family enum.
 fn family_from_key(value: &str) -> ImplantFamily {
     match value {
         "coff_loader" => ImplantFamily::CoffLoader,
@@ -256,10 +282,12 @@ fn family_from_key(value: &str) -> ImplantFamily {
     }
 }
 
+/// Normalizes a capability enum back into the plugin string key.
 fn capability_key(capability: &ImplantCapability) -> String {
     capability.key().to_string()
 }
 
+/// Wraps JSON encoding failures as I/O errors for the integration boundary.
 fn invalid_json(err: serde_json::Error) -> Error {
     Error::new(
         ErrorKind::InvalidData,

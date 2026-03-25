@@ -17,6 +17,15 @@ use crate::core::{
 
 /// Handles an implant registration packet.
 ///
+/// Flow:
+///
+///   packet
+///      -> parse RegisterPayload
+///      -> parse requested clientid from envelope
+///      -> context.register_implant(...)
+///      -> record activity
+///      -> reply with assigned clientid
+///
 /// @param context Shared application state used to update implant records.
 /// @param packet Parsed packet envelope containing the registration payload.
 /// @return Future that resolves to the packet reply sent back to the implant.

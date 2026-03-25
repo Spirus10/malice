@@ -1,3 +1,28 @@
+//! Packet wire-format helpers shared by the HTTP ingress and packet handlers.
+//!
+//! Wire format:
+//!
+//!   +--------+---------------------------------------------+
+//!   | byte 0 | opcode                                      |
+//!   +--------+---------------------------------------------+
+//!   | bytes  | UTF-8 JSON for `BasePacket`                 |
+//!   +--------+---------------------------------------------+
+//!
+//! `BasePacket` JSON:
+//!
+//!   {
+//!     "clientid": "<uuid or empty string>",
+//!     "data": "<JSON string for opcode-specific payload>"
+//!   }
+//!
+//! Decode path:
+//!
+//!   raw bytes
+//!      -> Packet::new(...)
+//!      -> opcode + BasePacket
+//!      -> Packet::parse_data::<T>()
+//!      -> typed payload for the selected handler
+
 use std::{
     io::{Error, ErrorKind, Result},
     net::SocketAddr,
@@ -28,6 +53,9 @@ pub enum PacketOpcode {
 }
 
 impl PacketOpcode {
+    /// Converts a packet opcode into its wire-format byte value.
+    ///
+    /// @return Opcode byte used on the wire.
     pub fn to_u8(&self) -> u8 {
         match self {
             PacketOpcode::Register => 0x00,
@@ -38,6 +66,10 @@ impl PacketOpcode {
         }
     }
 
+    /// Parses a wire-format opcode byte.
+    ///
+    /// @param v Opcode byte read from the wire.
+    /// @return Packet opcode variant matching the byte.
     pub fn from_u8(v: u8) -> Self {
         match v {
             0x00 => PacketOpcode::Register,
@@ -104,9 +136,16 @@ impl Packet {
             .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))
     }
 
+    /// Returns the typed packet opcode for the current envelope.
+    ///
+    /// @return Packet opcode derived from the stored opcode byte.
     pub fn opcode_kind(&self) -> PacketOpcode {
         PacketOpcode::from_u8(self.opcode)
     }
+
+    /// Returns the outer packet client identifier.
+    ///
+    /// @return Client identifier stored in the packet envelope.
     pub fn clientid(&self) -> &str {
         &self.clientid
     }
@@ -121,6 +160,7 @@ mod tests {
     use super::{Packet, PacketOpcode};
 
     #[test]
+    /// Verifies that packet serialization preserves opcode and payload fields.
     fn packet_round_trip_preserves_opcode_and_inner_json() {
         let clientid = "513a666c-3349-40dd-9462-95c4449b0d0d";
         let payload = json!({ "want": 1 });

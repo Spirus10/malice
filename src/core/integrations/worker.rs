@@ -1,3 +1,24 @@
+//! Stdio client for worker-style plugin runtimes.
+//!
+//! Process model:
+//!
+//!   teamserver
+//!      -> WorkerPluginClient
+//!      -> child process stdin/stdout/stderr
+//!      -> plugin runtime
+//!
+//! Request/response flow:
+//!
+//!   Rust request struct
+//!      -> JSON line on stdin
+//!      -> plugin handles `operation`
+//!      -> JSON line on stdout
+//!      -> typed Rust response
+//!
+//! Stderr is drained on a background thread and only surfaced when protocol
+//! errors occur, so plugin diagnostics are preserved without mixing them into
+//! the request channel.
+
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader, BufWriter, Error, ErrorKind, Result, Write},
@@ -29,6 +50,12 @@ struct WorkerSession {
 }
 
 impl WorkerPluginClient {
+    /// Starts the plugin worker process declared by the package descriptor.
+    ///
+    /// This is where the runtime boundary is established: the configured command
+    /// is resolved relative to the package, the child is spawned, and stderr is
+    /// drained into a ring buffer so later protocol failures can include plugin
+    /// diagnostics.
     pub fn start(package_root: &Path, descriptor: &PluginPackageDescriptor) -> Result<Self> {
         let PluginRuntimeDescriptor {
             runtime_type,
@@ -92,6 +119,18 @@ impl WorkerPluginClient {
         })
     }
 
+    /// Sends one RPC-style operation to the plugin and waits for the reply.
+    ///
+    /// Protocol contract:
+    ///
+    ///   request_id generated here
+    ///      -> request JSON line written to stdin
+    ///      -> response JSON line read from stdout
+    ///      -> request_id must match
+    ///      -> payload is deserialized into `T`
+    ///
+    /// Any recent stderr lines are appended to returned errors so a malformed
+    /// response can still be tied back to plugin-side failures.
     pub fn call<T: DeserializeOwned>(&self, operation: &str, payload: Value) -> Result<T> {
         let request = PluginRequestEnvelope {
             request_id: request_id(),
@@ -132,6 +171,7 @@ impl WorkerPluginClient {
         })
     }
 
+    /// Attaches recent plugin stderr output to a protocol error.
     fn decorate_protocol_error(&self, err: Error) -> Error {
         let stderr = self
             .stderr_lines
@@ -174,6 +214,7 @@ fn resolve_command(package_root: &Path, command: &[String]) -> Result<(PathBuf, 
     Ok((resolved, command.iter().skip(1).cloned().collect()))
 }
 
+/// Writes one newline-delimited JSON request to the plugin stdin stream.
 fn write_json_line(
     writer: &mut BufWriter<ChildStdin>,
     value: &PluginRequestEnvelope,
@@ -189,6 +230,7 @@ fn write_json_line(
     writer.flush()
 }
 
+/// Reads one newline-delimited JSON response from the plugin stdout stream.
 fn read_json_line<T: DeserializeOwned>(reader: &mut BufReader<ChildStdout>) -> Result<T> {
     let mut line = String::new();
     let bytes = reader.read_line(&mut line)?;
@@ -206,6 +248,7 @@ fn read_json_line<T: DeserializeOwned>(reader: &mut BufReader<ChildStdout>) -> R
     })
 }
 
+/// Drains plugin stderr into a bounded in-memory buffer for later error context.
 fn spawn_stderr_drain(stderr: ChildStderr, buffer: Arc<Mutex<VecDeque<String>>>) {
     thread::spawn(move || {
         let reader = BufReader::new(stderr);

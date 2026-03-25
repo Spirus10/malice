@@ -1,3 +1,26 @@
+//! Filesystem-backed plugin package store.
+//!
+//! Directory layout:
+//!
+//!   plugins/
+//!     packages/
+//!       <plugin_id>/
+//!         <version>/   <- immutable installed package copy
+//!     active/
+//!       <plugin_id>/   <- activated copy used at runtime
+//!
+//! Activation model:
+//!
+//!   install_from_dir(source)
+//!      -> copy into packages/<id>/<version>
+//!
+//!   activate(id, version?)
+//!      -> resolve installed version
+//!      -> replace active/<id> with a copy of that package
+//!
+//! The active copy is what the integration registry loads, which keeps runtime
+//! discovery separate from the archive of installed versions.
+
 use std::{
     fs,
     io::{Error, ErrorKind, Result},
@@ -54,6 +77,7 @@ pub struct PluginStore {
 }
 
 impl PluginPackageDescriptor {
+    /// Loads `plugin.json` from a package root.
     pub fn load(package_root: &Path) -> Result<Self> {
         let descriptor_path = package_root.join("plugin.json");
         let contents = fs::read_to_string(&descriptor_path).map_err(|err| {
@@ -76,6 +100,15 @@ impl PluginPackageDescriptor {
         })
     }
 
+    /// Validates that the package can be installed and activated by this core.
+    ///
+    /// Checks include:
+    ///
+    ///   - semantic version syntax
+    ///   - minimum supported core version
+    ///   - supported plugin API version
+    ///   - required manifest and runtime files exist
+    ///   - descriptor fields agree with the manifest
     pub fn validate(&self, package_root: &Path) -> Result<()> {
         parse_version(&self.version)?;
         let min_core_version = parse_version(&self.min_core_version)?;
@@ -146,6 +179,7 @@ impl PluginPackageDescriptor {
         Ok(())
     }
 
+    /// Loads the integration manifest referenced by the descriptor.
     pub fn load_manifest(&self, package_root: &Path) -> Result<IntegrationManifest> {
         IntegrationManifest::load(&package_root.join(&self.manifest_path))
     }
@@ -156,6 +190,7 @@ impl PluginStore {
         Self { root: root.into() }
     }
 
+    /// Enumerates all installed packages and marks whichever version is active.
     pub fn list_installed(&self) -> Result<Vec<InstalledPluginSummary>> {
         self.ensure_layout()?;
         let mut installed = Vec::new();
@@ -184,6 +219,7 @@ impl PluginStore {
         Ok(installed)
     }
 
+    /// Installs a package by copying it into the versioned package archive.
     pub fn install_from_dir(&self, source: &Path) -> Result<InstalledPluginSummary> {
         self.ensure_layout()?;
         let descriptor = PluginPackageDescriptor::load(source)?;
@@ -208,6 +244,10 @@ impl PluginStore {
         })
     }
 
+    /// Activates a package version by copying it into the runtime `active` tree.
+    ///
+    /// The store intentionally activates via copy rather than pointer/symlink so
+    /// the runtime loader always sees a self-contained directory tree.
     pub fn activate(
         &self,
         plugin_id: &str,
@@ -227,6 +267,7 @@ impl PluginStore {
         })
     }
 
+    /// Removes the active runtime copy for a plugin.
     pub fn deactivate(&self, plugin_id: &str) -> Result<()> {
         self.ensure_layout()?;
         let active_root = self.active_plugin_root(plugin_id);
@@ -239,6 +280,7 @@ impl PluginStore {
         remove_dir_if_exists(&active_root)
     }
 
+    /// Deletes one archived plugin version when it is not currently active.
     pub fn remove(&self, plugin_id: &str, version: &str) -> Result<()> {
         self.ensure_layout()?;
         if self.active_version(plugin_id)?.as_deref() == Some(version) {
@@ -261,6 +303,7 @@ impl PluginStore {
         remove_dir_if_exists(&package_root)
     }
 
+    /// Loads both descriptor and manifest details for an installed package.
     pub fn inspect(&self, plugin_id: &str, version: Option<&str>) -> Result<PluginInspection> {
         self.ensure_layout()?;
         let package_root = self.resolve_installed_package(plugin_id, version)?;
@@ -276,6 +319,7 @@ impl PluginStore {
         })
     }
 
+    /// Returns all currently active plugin roots that should be loaded at runtime.
     pub fn active_plugin_roots(&self) -> Result<Vec<PathBuf>> {
         self.ensure_layout()?;
         read_dirs(&self.active_root())
@@ -285,6 +329,17 @@ impl PluginStore {
         PluginPackageDescriptor::load(package_root)
     }
 
+    /// Resolves a package path, defaulting to the highest installed version.
+    ///
+    /// Selection flow:
+    ///
+    ///   explicit version
+    ///      -> packages/<id>/<version>
+    ///
+    ///   no version
+    ///      -> enumerate installed versions
+    ///      -> parse semantic versions
+    ///      -> choose max(version)
     fn resolve_installed_package(&self, plugin_id: &str, version: Option<&str>) -> Result<PathBuf> {
         let plugin_root = self.packages_root().join(plugin_id);
         if !plugin_root.exists() {
@@ -327,6 +382,7 @@ impl PluginStore {
             })
     }
 
+    /// Reads the version of the currently active runtime copy, if any.
     fn active_version(&self, plugin_id: &str) -> Result<Option<String>> {
         let active_root = self.active_plugin_root(plugin_id);
         if !active_root.exists() {
@@ -371,6 +427,7 @@ fn parse_version(input: &str) -> Result<(u64, u64, u64)> {
     Ok((major, minor, patch))
 }
 
+/// Parses one component of a strict `major.minor.patch` version string.
 fn parse_version_part(part: Option<&str>, original: &str) -> Result<u64> {
     part.ok_or_else(|| {
         Error::new(
@@ -387,6 +444,7 @@ fn parse_version_part(part: Option<&str>, original: &str) -> Result<u64> {
     })
 }
 
+/// Returns sorted child directories under `root`.
 fn read_dirs(root: &Path) -> Result<Vec<PathBuf>> {
     let mut dirs = Vec::new();
     if !root.exists() {
@@ -403,6 +461,7 @@ fn read_dirs(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(dirs)
 }
 
+/// Extracts the final path component as a UTF-8 string.
 fn file_name_string(path: &Path) -> Result<String> {
     path.file_name()
         .and_then(|value| value.to_str())
@@ -415,6 +474,7 @@ fn file_name_string(path: &Path) -> Result<String> {
         })
 }
 
+/// Recursively copies a directory tree.
 fn copy_dir_all(source: &Path, destination: &Path) -> Result<()> {
     fs::create_dir_all(destination)?;
     for entry in fs::read_dir(source)? {
@@ -433,6 +493,7 @@ fn copy_dir_all(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Deletes a directory tree when it exists.
 fn remove_dir_if_exists(path: &Path) -> Result<()> {
     if path.exists() {
         fs::remove_dir_all(path)?;

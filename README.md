@@ -178,6 +178,18 @@ Build the Rust application:
 cargo build
 ```
 
+Build and stage a runtime-ready release folder:
+
+```powershell
+cargo package-release
+```
+
+That produces:
+
+- `target/release/malice/malice.exe` on Windows
+- `target/release/malice/malice` on Linux
+- `target/release/malice/plugins/...` with the runtime plugin store
+
 Run the terminal UI:
 
 ```powershell

@@ -8,6 +8,11 @@ pub struct PacketRequestContext {
 }
 
 pub trait AdmissionPolicy: Send + Sync {
+    /// Validates whether a packet is allowed to proceed for the current request.
+    ///
+    /// @param request Request-scoped metadata extracted from the transport layer.
+    /// @param packet Parsed packet envelope being evaluated.
+    /// @return `Ok(())` when the request is authorized, otherwise an I/O error.
     fn validate(&self, request: &PacketRequestContext, packet: &Packet) -> Result<()>;
 }
 
@@ -19,6 +24,11 @@ impl RegisterHeaderPolicy {
 }
 
 impl AdmissionPolicy for RegisterHeaderPolicy {
+    /// Validates the registration header for incoming register packets.
+    ///
+    /// @param request Request-scoped metadata extracted from the transport layer.
+    /// @param packet Parsed packet envelope being evaluated.
+    /// @return `Ok(())` when the register packet contains the expected header value.
     fn validate(&self, request: &PacketRequestContext, packet: &Packet) -> Result<()> {
         if packet.opcode_kind() != PacketOpcode::Register {
             return Ok(());

@@ -1,3 +1,21 @@
+//! Wire types for the JSON-RPC-like plugin worker protocol.
+//!
+//! Message flow:
+//!
+//!   core -> PluginRequestEnvelope  -> worker stdin
+//!   core <- PluginResponseEnvelope <- worker stdout
+//!
+//! Operation families:
+//!
+//!   get_manifest
+//!   validate_registration
+//!   build_task
+//!   serialize_task
+//!   decode_result
+//!
+//! Each operation uses the shared request/response envelope plus an
+//! operation-specific payload schema defined in this module.
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -114,10 +132,12 @@ pub struct DecodeResultResponse {
     pub result: PluginResultBody,
 }
 
+/// Generates a request id used to correlate one plugin request/response pair.
 pub fn request_id() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// Converts a registration payload into generic JSON for the plugin RPC layer.
 pub fn registration_payload_value(payload: &RegisterPayload) -> Value {
     serde_json::to_value(payload).expect("register payload should always serialize")
 }

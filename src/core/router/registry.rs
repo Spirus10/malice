@@ -1,3 +1,15 @@
+//! Packet router for decoded implant traffic.
+//!
+//! Routing flow:
+//!
+//!   HTTP request
+//!      -> Packet::new(...)
+//!      -> PacketRouter::route(packet)
+//!      -> opcode lookup
+//!      -> handler(context, packet)
+//!      -> PacketReply
+//!      -> HTTP response
+
 use std::{
     collections::HashMap,
     future::Future,
@@ -43,6 +55,13 @@ impl PacketRouter {
     }
 
     /// Routes one decoded packet to the matching opcode handler.
+    ///
+    /// Flow:
+    ///
+    ///   packet.opcode_kind()
+    ///      -> handler table lookup
+    ///      -> registered handler
+    ///      -> PacketReply
     ///
     /// @param packet Parsed packet envelope received from the HTTP layer.
     /// @return Packet reply produced by the matching handler or an error reply.

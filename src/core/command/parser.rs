@@ -1,4 +1,22 @@
 //! Parses operator command lines into structured command enums.
+//!
+//! Parsing stages:
+//!
+//!   raw line
+//!      -> tokenize_command_line
+//!         - preserves quoted substrings as one token
+//!         - strips the surrounding quote characters
+//!      -> parse_command
+//!         - dispatches on the first token
+//!         - validates argument shape for that command family
+//!         - returns a typed `ParsedCommand`
+//!
+//! Example:
+//!
+//!   task queue selected execute "cmd.exe /c echo hello"
+//!
+//!      -> ["task", "queue", "selected", "execute", "cmd.exe /c echo hello"]
+//!      -> ParsedCommand::Tasks(TaskCommand::Queue { ... })
 
 #[derive(Debug, Clone)]
 pub enum ParsedCommand {
@@ -87,6 +105,15 @@ pub fn tokenize_command_line(input: &str) -> Result<Vec<String>, String> {
 }
 
 /// Parses one operator command line into the internal command model.
+///
+/// Decision tree:
+///
+///   first token
+///      -> "httpserver" -> ServerCommand
+///      -> "implants"   -> ImplantCommand
+///      -> "plugins"    -> PluginCommand
+///      -> "task"       -> TaskCommand
+///      -> "exit"       -> ParsedCommand::Exit
 ///
 /// @param input Raw command line entered by the operator.
 /// @return Parsed command on success, or a usage/error message on failure.

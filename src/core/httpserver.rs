@@ -158,14 +158,23 @@ impl HttpServer {
         }
     }
 
+    /// Returns the shared server context used by the listener.
+    ///
+    /// @return Shared server context.
     pub fn context(&self) -> Arc<ServerContext> {
         self.context.clone()
     }
 
+    /// Reports whether the listener task is currently running.
+    ///
+    /// @return `true` when the server has been started and not yet closed.
     pub fn is_running(&self) -> bool {
         !self.closed.load(Ordering::Relaxed)
     }
 
+    /// Returns the configured local socket address for the server.
+    ///
+    /// @return Socket address used for listener binding.
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
