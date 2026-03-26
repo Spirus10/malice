@@ -51,6 +51,14 @@ impl ServerContext {
         })
     }
 
+    fn integrations_read(&self) -> std::sync::RwLockReadGuard<'_, ImplantIntegrationRegistry> {
+        self.integrations.read().expect("integration registry lock poisoned")
+    }
+
+    fn integrations_write(&self) -> std::sync::RwLockWriteGuard<'_, ImplantIntegrationRegistry> {
+        self.integrations.write().expect("integration registry lock poisoned")
+    }
+
     pub fn router(&self) -> &PacketRouter {
         &self.router
     }
@@ -137,9 +145,7 @@ impl ServerContext {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "Unknown implant")
             })?;
         let integration = self
-            .integrations
-            .read()
-            .expect("integration registry lock poisoned")
+            .integrations_read()
             .by_implant_type(&implant.identity.implant_type)?;
         let spec = integration
             .build_task(&implant, task_kind, args, &self.payloads)?
@@ -203,9 +209,7 @@ impl ServerContext {
         payload: super::implants::RegisterPayload,
     ) -> IoResult<ImplantRecord> {
         let integration = self
-            .integrations
-            .read()
-            .expect("integration registry lock poisoned")
+            .integrations_read()
             .by_implant_type(&payload.implant_type)?;
         integration.validate_registration(&payload)?;
         self.implants
@@ -232,9 +236,7 @@ impl ServerContext {
         let mut envelopes = Vec::with_capacity(tasks.len());
         for task in tasks {
             let integration = self
-                .integrations
-                .read()
-                .expect("integration registry lock poisoned")
+                .integrations_read()
                 .by_id(&task.integration_id)?;
             envelopes.push(integration.serialize_task(&task)?);
         }
@@ -252,9 +254,7 @@ impl ServerContext {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "Unknown task id")
             })?;
         let integration = self
-            .integrations
-            .read()
-            .expect("integration registry lock poisoned")
+            .integrations_read()
             .by_id(&task.integration_id)?;
         let (task_id, status, result) = integration.decode_result(&task, payload)?;
         self.tasks.complete_result(task_id, status, result).await
@@ -265,9 +265,7 @@ impl ServerContext {
         implant: &ImplantRecord,
     ) -> IoResult<super::implants::TaskingMetadata> {
         let integration = self
-            .integrations
-            .read()
-            .expect("integration registry lock poisoned")
+            .integrations_read()
             .by_implant_type(&implant.identity.implant_type)?;
         let definitions: &[TaskDefinition] = integration.task_definitions();
         Ok(super::implants::TaskingMetadata {
@@ -291,9 +289,7 @@ impl ServerContext {
         implant: &ImplantRecord,
     ) -> IoResult<Vec<UiActionDefinition>> {
         let integration = self
-            .integrations
-            .read()
-            .expect("integration registry lock poisoned")
+            .integrations_read()
             .by_implant_type(&implant.identity.implant_type)?;
         let mut actions = integration.ui_actions().to_vec();
         actions.push(UiActionDefinition {
@@ -343,19 +339,14 @@ impl ServerContext {
     }
 
     pub fn plugin_load_errors(&self) -> Vec<String> {
-        self.integrations
-            .read()
-            .expect("integration registry lock poisoned")
+        self.integrations_read()
             .load_errors()
             .to_vec()
     }
 
     fn reload_integrations(&self) -> IoResult<()> {
         let updated = ImplantIntegrationRegistry::load(&self.plugins);
-        let mut lock = self
-            .integrations
-            .write()
-            .expect("integration registry lock poisoned");
+        let mut lock = self.integrations_write();
         *lock = updated;
         Ok(())
     }

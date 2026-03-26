@@ -9,17 +9,23 @@ use uuid::Uuid;
 
 use super::types::{QueuedTask, TaskRecord, TaskResultData, TaskStatus};
 
+struct TaskRepositoryInner {
+    tasks: HashMap<Uuid, TaskRecord>,
+    queues: HashMap<Uuid, VecDeque<Uuid>>,
+}
+
 #[derive(Clone)]
 pub struct TaskRepository {
-    tasks: Arc<Mutex<HashMap<Uuid, TaskRecord>>>,
-    queues: Arc<Mutex<HashMap<Uuid, VecDeque<Uuid>>>>,
+    inner: Arc<Mutex<TaskRepositoryInner>>,
 }
 
 impl TaskRepository {
     pub fn new() -> Self {
         Self {
-            tasks: Arc::new(Mutex::new(HashMap::new())),
-            queues: Arc::new(Mutex::new(HashMap::new())),
+            inner: Arc::new(Mutex::new(TaskRepositoryInner {
+                tasks: HashMap::new(),
+                queues: HashMap::new(),
+            })),
         }
     }
 
@@ -43,10 +49,10 @@ impl TaskRepository {
             result: None,
         };
 
-        self.tasks.lock().await.insert(task.task_id, task.clone());
-        self.queues
-            .lock()
-            .await
+        let mut inner = self.inner.lock().await;
+        inner.tasks.insert(task.task_id, task.clone());
+        inner
+            .queues
             .entry(clientid)
             .or_insert_with(VecDeque::new)
             .push_back(task.task_id);
@@ -55,26 +61,23 @@ impl TaskRepository {
     }
 
     pub async fn lease_tasks(&self, clientid: Uuid, want: usize) -> Vec<TaskRecord> {
-        let mut queues = self.queues.lock().await;
-        let Some(queue) = queues.get_mut(&clientid) else {
-            return Vec::new();
-        };
-
+        let mut inner = self.inner.lock().await;
         let mut task_ids = Vec::new();
-        for _ in 0..want.max(1) {
-            if let Some(task_id) = queue.pop_front() {
-                task_ids.push(task_id);
-            } else {
-                break;
+
+        if let Some(queue) = inner.queues.get_mut(&clientid) {
+            for _ in 0..want.max(1) {
+                if let Some(task_id) = queue.pop_front() {
+                    task_ids.push(task_id);
+                } else {
+                    break;
+                }
             }
         }
-        drop(queues);
 
         let now = SystemTime::now();
-        let mut tasks = self.tasks.lock().await;
         let mut leased = Vec::new();
         for task_id in task_ids {
-            if let Some(task) = tasks.get_mut(&task_id) {
+            if let Some(task) = inner.tasks.get_mut(&task_id) {
                 task.status = TaskStatus::Leased;
                 task.leased_at = Some(now);
                 leased.push(task.clone());
@@ -90,8 +93,8 @@ impl TaskRepository {
         status: TaskStatus,
         result: TaskResultData,
     ) -> Option<TaskRecord> {
-        let mut tasks = self.tasks.lock().await;
-        let task = tasks.get_mut(&task_id)?;
+        let mut inner = self.inner.lock().await;
+        let task = inner.tasks.get_mut(&task_id)?;
         task.status = status;
         task.completed_at = Some(SystemTime::now());
         task.result = Some(result);
@@ -99,11 +102,12 @@ impl TaskRepository {
     }
 
     pub async fn get(&self, task_id: &Uuid) -> Option<TaskRecord> {
-        self.tasks.lock().await.get(task_id).cloned()
+        self.inner.lock().await.tasks.get(task_id).cloned()
     }
 
     pub async fn list_recent(&self, limit: usize) -> Vec<TaskRecord> {
-        let mut tasks: Vec<_> = self.tasks.lock().await.values().cloned().collect();
+        let inner = self.inner.lock().await;
+        let mut tasks: Vec<_> = inner.tasks.values().cloned().collect();
         tasks.sort_by(|left, right| {
             right
                 .completed_at
@@ -115,10 +119,9 @@ impl TaskRepository {
     }
 
     pub async fn list_recent_for_implant(&self, clientid: &Uuid, limit: usize) -> Vec<TaskRecord> {
-        let mut tasks: Vec<_> = self
+        let inner = self.inner.lock().await;
+        let mut tasks: Vec<_> = inner
             .tasks
-            .lock()
-            .await
             .values()
             .filter(|task| &task.clientid == clientid)
             .cloned()

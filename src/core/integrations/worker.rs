@@ -26,6 +26,7 @@ use std::{
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 
 use serde::de::DeserializeOwned;
@@ -169,6 +170,26 @@ impl WorkerPluginClient {
                 format!("Unable to parse plugin response payload: {err}"),
             ))
         })
+    }
+
+    /// Async wrapper around `call()` that runs the blocking I/O on a dedicated
+    /// thread pool via `spawn_blocking` and enforces a 10-second timeout.
+    pub async fn call_async<T: serde::de::DeserializeOwned + Send + 'static>(
+        self: &Arc<Self>,
+        operation: &str,
+        payload: serde_json::Value,
+    ) -> Result<T> {
+        let client = Arc::clone(self);
+        let operation = operation.to_string();
+        let handle = tokio::task::spawn_blocking(move || client.call::<T>(&operation, payload));
+        match tokio::time::timeout(Duration::from_secs(10), handle).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(join_err)) => Err(Error::other(format!("worker task panicked: {join_err}"))),
+            Err(_elapsed) => Err(Error::new(
+                ErrorKind::TimedOut,
+                "plugin worker call timed out after 10s",
+            )),
+        }
     }
 
     /// Attaches recent plugin stderr output to a protocol error.

@@ -430,11 +430,14 @@ impl TuiController {
         let parsed = CommandHandler::parse_command(&input)
             .map_err(|err| Error::new(ErrorKind::InvalidInput, err.to_string()))?;
         let parsed = self.resolve_aliases(parsed, state)?;
-        let output = self
-            .handler
-            .handle(parsed)
-            .await
-            .map_err(|err| Error::other(err.to_string()))?;
+        let output = match self.handler.handle(parsed).await {
+            Ok(output) => output,
+            Err(err) if err.is_exit() => {
+                state.should_quit = true;
+                return Ok(());
+            }
+            Err(err) => return Err(Error::other(err.to_string())),
+        };
 
         state.teamserver_output = output.as_lines().to_vec();
         state.push_teamserver_history(input);
