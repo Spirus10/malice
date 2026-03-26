@@ -33,6 +33,31 @@ use super::manifest::IntegrationManifest;
 
 const SUPPORTED_PLUGIN_API_VERSION: u32 = 1;
 
+fn validate_path_component(value: &str, field_name: &str) -> Result<()> {
+    if value.is_empty() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("{field_name} must not be empty"),
+        ));
+    }
+    if value.contains('/') || value.contains('\\') || value.contains("..") {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("{field_name} contains invalid path characters"),
+        ));
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("{field_name} contains invalid characters"),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PluginPackageDescriptor {
     pub package_id: String,
@@ -110,6 +135,8 @@ impl PluginPackageDescriptor {
     ///   - required manifest and runtime files exist
     ///   - descriptor fields agree with the manifest
     pub fn validate(&self, package_root: &Path) -> Result<()> {
+        validate_path_component(&self.plugin_id, "plugin_id")?;
+        validate_path_component(&self.version, "version")?;
         parse_version(&self.version)?;
         let min_core_version = parse_version(&self.min_core_version)?;
         let core_version =
@@ -223,6 +250,8 @@ impl PluginStore {
     pub fn install_from_dir(&self, source: &Path) -> Result<InstalledPluginSummary> {
         self.ensure_layout()?;
         let descriptor = PluginPackageDescriptor::load(source)?;
+        validate_path_component(&descriptor.plugin_id, "plugin_id")?;
+        validate_path_component(&descriptor.version, "version")?;
         descriptor.validate(source)?;
         let destination = self.package_dir(&descriptor.plugin_id, &descriptor.version);
         if destination.exists() {
@@ -254,6 +283,10 @@ impl PluginStore {
         version: Option<&str>,
     ) -> Result<InstalledPluginSummary> {
         self.ensure_layout()?;
+        validate_path_component(plugin_id, "plugin_id")?;
+        if let Some(v) = version {
+            validate_path_component(v, "version")?;
+        }
         let package_root = self.resolve_installed_package(plugin_id, version)?;
         let descriptor = PluginPackageDescriptor::load(&package_root)?;
         let active_root = self.active_plugin_root(plugin_id);
@@ -283,6 +316,8 @@ impl PluginStore {
     /// Deletes one archived plugin version when it is not currently active.
     pub fn remove(&self, plugin_id: &str, version: &str) -> Result<()> {
         self.ensure_layout()?;
+        validate_path_component(plugin_id, "plugin_id")?;
+        validate_path_component(version, "version")?;
         if self.active_version(plugin_id)?.as_deref() == Some(version) {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -306,6 +341,10 @@ impl PluginStore {
     /// Loads both descriptor and manifest details for an installed package.
     pub fn inspect(&self, plugin_id: &str, version: Option<&str>) -> Result<PluginInspection> {
         self.ensure_layout()?;
+        validate_path_component(plugin_id, "plugin_id")?;
+        if let Some(v) = version {
+            validate_path_component(v, "version")?;
+        }
         let package_root = self.resolve_installed_package(plugin_id, version)?;
         let descriptor = PluginPackageDescriptor::load(&package_root)?;
         let manifest = descriptor.load_manifest(&package_root)?;
@@ -341,6 +380,10 @@ impl PluginStore {
     ///      -> parse semantic versions
     ///      -> choose max(version)
     fn resolve_installed_package(&self, plugin_id: &str, version: Option<&str>) -> Result<PathBuf> {
+        validate_path_component(plugin_id, "plugin_id")?;
+        if let Some(v) = version {
+            validate_path_component(v, "version")?;
+        }
         let plugin_root = self.packages_root().join(plugin_id);
         if !plugin_root.exists() {
             return Err(Error::new(

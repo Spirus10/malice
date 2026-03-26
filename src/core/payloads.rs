@@ -24,6 +24,10 @@ impl PayloadRepository {
 
 impl ArtifactSource for PayloadRepository {
     fn resolve(&self, logical_name: &str, search_roots: &[PathBuf]) -> Result<PayloadArtifact> {
+        if logical_name.contains('/') || logical_name.contains('\\') || logical_name.contains("..") {
+            return Err(Error::new(ErrorKind::InvalidInput, "invalid artifact name"));
+        }
+
         for root in search_roots {
             let candidate = root.join(format!("{logical_name}.obj"));
             if candidate.exists() {

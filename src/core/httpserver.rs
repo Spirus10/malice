@@ -5,11 +5,21 @@ use std::{
     net::SocketAddr,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
 };
 
-use http_body_util::{BodyExt, Full};
+static BIND_ADDR: OnceLock<SocketAddr> = OnceLock::new();
+
+pub fn set_bind_addr(addr: SocketAddr) {
+    let _ = BIND_ADDR.set(addr);
+}
+
+pub fn default_bind_addr() -> SocketAddr {
+    *BIND_ADDR.get_or_init(|| SocketAddr::from(([127, 0, 0, 1], 42069)))
+}
+
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{body::Bytes, body::Incoming as IncomingBody, Method, Request, Response, StatusCode};
@@ -39,7 +49,7 @@ impl HttpServer {
     /// @return HTTP server wrapper bound to the default localhost address.
     pub fn new(context: Arc<ServerContext>) -> Self {
         Self {
-            local_addr: SocketAddr::from(([127, 0, 0, 1], 42069)),
+            local_addr: default_bind_addr(),
             closed: Arc::new(AtomicBool::new(true)),
             context,
             handle: Arc::new(Mutex::new(None)),
@@ -65,11 +75,13 @@ impl HttpServer {
 
         let (parts, body) = req.into_parts();
 
-        let body = match body.collect().await {
+        let limited_body = Limited::new(body, 10 * 1024 * 1024);
+        let body = match limited_body.collect().await {
             Ok(body) => body.to_bytes(),
             Err(err) => {
-                let mut response = Response::new(Full::new(Bytes::from(err.to_string())));
-                *response.status_mut() = StatusCode::BAD_REQUEST;
+                eprintln!("body read error: {err}");
+                let mut response = Response::new(Full::new(Bytes::from("bad request")));
+                *response.status_mut() = StatusCode::PAYLOAD_TOO_LARGE;
                 return Ok(response);
             }
         };
@@ -77,7 +89,8 @@ impl HttpServer {
         let packet = match Packet::new(peer_addr, &body) {
             Ok(packet) => packet,
             Err(err) => {
-                let mut response = Response::new(Full::new(Bytes::from(err.to_string())));
+                eprintln!("packet parse error: {err}");
+                let mut response = Response::new(Full::new(Bytes::from("bad request")));
                 *response.status_mut() = StatusCode::BAD_REQUEST;
                 return Ok(response);
             }
@@ -91,7 +104,8 @@ impl HttpServer {
                 .map(str::to_string),
         );
         if let Err(err) = context.admission().validate(&request_context, &packet) {
-            let mut response = Response::new(Full::new(Bytes::from(err.to_string())));
+            eprintln!("admission denied: {err}");
+            let mut response = Response::new(Full::new(Bytes::from("forbidden")));
             *response.status_mut() = StatusCode::FORBIDDEN;
             return Ok(response);
         }

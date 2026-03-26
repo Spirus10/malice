@@ -37,8 +37,9 @@ pub fn handle(
         match packet.parse_data::<FetchTaskRequest>() {
             Ok(request) => match parse_clientid(packet.clientid()) {
                 Ok(clientid) => {
+                    let want = request.want.unwrap_or(1).min(10);
                     match context
-                        .fetch_tasks_for_implant(clientid, request.want.unwrap_or(1))
+                        .fetch_tasks_for_implant(clientid, want)
                         .await
                     {
                         Ok(response) => {
