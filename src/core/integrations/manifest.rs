@@ -104,7 +104,7 @@ impl IntegrationManifest {
         Ok(self
             .capabilities
             .iter()
-            .map(|capability| ImplantCapability::from_key(capability))
+            .map(|capability| ImplantCapability::new(capability))
             .collect())
     }
 

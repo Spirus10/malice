@@ -184,7 +184,7 @@ impl ImplantIntegration for WorkerPluginIntegration {
         )?;
         Ok(response.queued_task.map(|queued| QueuedTask {
             kind: queued.kind,
-            required_capability: ImplantCapability::from_key(&queued.required_capability),
+            required_capability: ImplantCapability::new(&queued.required_capability),
             state: queued.state,
         }))
     }

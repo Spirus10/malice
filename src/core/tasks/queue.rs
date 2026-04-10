@@ -93,7 +93,7 @@ mod tests {
     fn execute_coff_task() -> QueuedTask {
         QueuedTask {
             kind: "whoami".to_string(),
-            required_capability: ImplantCapability::from_key("execute_coff"),
+            required_capability: ImplantCapability::new("execute_coff"),
             state: json!({
                 "task_type": "execute_coff",
                 "object_name": "whoami.obj",
@@ -107,7 +107,7 @@ mod tests {
     }
 
     async fn implant_with_capabilities(capabilities: Vec<ImplantCapability>) -> ImplantRecord {
-        let execute_coff = ImplantCapability::from_key("execute_coff");
+        let execute_coff = ImplantCapability::new("execute_coff");
         let family = if capabilities.contains(&execute_coff) {
             "coff_loader"
         } else {
@@ -164,7 +164,7 @@ mod tests {
     async fn queue_and_complete_execute_coff_task() {
         let service = TaskService::new();
         let implant =
-            implant_with_capabilities(vec![ImplantCapability::from_key("execute_coff")]).await;
+            implant_with_capabilities(vec![ImplantCapability::new("execute_coff")]).await;
 
         let task = service
             .queue_task_for_implant(&implant, "test", execute_coff_task())
